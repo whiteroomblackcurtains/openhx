@@ -25,6 +25,8 @@ pub struct ParameterDefinition {
     pub max: Option<serde_json::Value>,
     #[serde(default)]
     pub default: Option<serde_json::Value>,
+    #[serde(default, rename = "displayType")]
+    pub display_type: Option<String>,
 }
 
 impl ParameterDefinition {

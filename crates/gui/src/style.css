@@ -33,6 +33,8 @@ button:disabled { opacity: .45; cursor: default; }
 .preset-index { color: #91a1b7; width: 28px; font-family: monospace; }
 .chain-panel { display: grid; grid-template-rows: auto auto minmax(0, 1fr); overflow: hidden; }
 .chain-scroll { min-height: 0; overflow: auto; padding: 10px 2px 14px; }
+.path-row { display: flex; align-items: flex-start; gap: 12px; min-width: max-content; margin-bottom: 18px; }
+.path-label { width: 52px; padding-top: 52px; color: #788396; font-size: 10px; letter-spacing: 1px; writing-mode: vertical-rl; transform: rotate(180deg); }
 .chain { display: flex; align-items: stretch; gap: 8px; min-width: max-content; }
 .arrow { align-self: center; color: #6c7484; font-size: 18px; }
 .block { width: 112px; min-height: 118px; display: flex; flex-direction: column; align-items: stretch; padding: 7px; background: #252a34; border: 2px solid #515a6b; border-radius: 6px; cursor: pointer; user-select: none; }

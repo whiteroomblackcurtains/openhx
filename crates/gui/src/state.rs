@@ -14,6 +14,9 @@ pub struct EditorParameter {
     pub value: f32,
     pub min: f32,
     pub max: f32,
+    pub step: f32,
+    pub unit: String,
+    pub device_scale: f32,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -113,6 +116,29 @@ fn editor_block_with_values(
 ) -> Result<EditorBlock, String> {
     let definition = crate::catalog::model(model_id);
     let Some(definition) = definition else {
+        if is_flow_model(model_id) {
+            return Ok(EditorBlock {
+                slot,
+                model_id: model_id.to_string(),
+                name: flow_model_name(model_id).to_string(),
+                model: model_id.to_string(),
+                parameters: parameter_names
+                    .iter()
+                    .enumerate()
+                    .map(|(index, name)| EditorParameter {
+                        index: index as u8,
+                        symbolic_id: name.clone(),
+                        name: name.clone(),
+                        value: values.get(index).copied().unwrap_or(0.5),
+                        min: 0.0,
+                        max: 1.0,
+                        step: 0.01,
+                        unit: String::new(),
+                        device_scale: 1.0,
+                    })
+                    .collect(),
+            });
+        }
         return Err(format!("model resource not found for {model_id}"));
     };
     let name = definition
@@ -127,18 +153,22 @@ fn editor_block_with_values(
                 parameter.symbolic_id == *parameter_name
                     || parameter.name.as_deref() == Some(parameter_name)
             });
-            let (symbolic_id, name, min, max, fallback) = match parameter {
+            let (symbolic_id, name, min, max, fallback, step, unit, device_scale) = match parameter
+            {
                 Some(parameter) => (
                     parameter.symbolic_id.clone(),
                     parameter.display_name(),
-                    parameter.min_value().unwrap_or(0.0),
-                    parameter.max_value().unwrap_or(1.0),
+                    parameter.min_value().unwrap_or(0.0) * display_scale(model_id, parameter),
+                    parameter.max_value().unwrap_or(1.0) * display_scale(model_id, parameter),
                     parameter.default_value().unwrap_or_else(|| {
                         match (parameter.min_value(), parameter.max_value()) {
                             (Some(min), Some(max)) => (min + max) / 2.0,
                             _ => 0.5,
                         }
-                    }),
+                    }) * display_scale(model_id, parameter),
+                    display_step(model_id, parameter),
+                    display_unit(parameter),
+                    display_scale(model_id, parameter),
                 ),
                 None => (
                     parameter_name.clone(),
@@ -146,15 +176,25 @@ fn editor_block_with_values(
                     0.0,
                     1.0,
                     0.5,
+                    0.01,
+                    String::new(),
+                    1.0,
                 ),
             };
             Ok(EditorParameter {
                 index: index as u8,
                 symbolic_id,
                 name,
-                value: values.get(index).copied().unwrap_or(fallback),
+                value: values
+                    .get(index)
+                    .copied()
+                    .map(|value| value * device_scale)
+                    .unwrap_or(fallback),
                 min,
                 max,
+                step,
+                unit,
+                device_scale,
             })
         })
         .collect::<Result<Vec<_>, String>>()?;
@@ -166,4 +206,53 @@ fn editor_block_with_values(
         model: model_id.to_string(),
         parameters,
     })
+}
+
+pub fn is_flow_model(model_id: &str) -> bool {
+    model_id.starts_with("HD2_AppDSPFlow")
+}
+
+fn flow_model_name(model_id: &str) -> &'static str {
+    match model_id {
+        "HD2_AppDSPFlowSplitY" => "Split Y",
+        "HD2_AppDSPFlowSplitAB" => "Split A/B",
+        "HD2_AppDSPFlowSplitXOver" => "Split Crossover",
+        "HD2_AppDSPFlowSplitDyn" => "Split Dynamic",
+        "HD2_AppDSPFlowJoin" => "Merge",
+        "HD2_AppDSPFlow1Input" | "HD2_AppDSPFlow2Input" => "Input",
+        "HD2_AppDSPFlowOutput" => "Output",
+        _ => "Signal flow",
+    }
+}
+
+fn display_scale(model_id: &str, parameter: &crate::catalog::ParameterDefinition) -> f32 {
+    match parameter.display_type.as_deref() {
+        Some("time_ms_reverb") => 1000.0,
+        Some("percent") => 100.0,
+        Some("generic_knob") if model_id.contains("Reverb") && parameter.symbolic_id == "Decay" => {
+            10.0
+        }
+        _ => 1.0,
+    }
+}
+
+fn display_step(model_id: &str, parameter: &crate::catalog::ParameterDefinition) -> f32 {
+    match parameter.display_type.as_deref() {
+        Some("time_ms_reverb") | Some("mod_low_cut") | Some("mod_high_cut") => 1.0,
+        Some("percent") => 1.0,
+        Some("generic_knob") if model_id.contains("Reverb") && parameter.symbolic_id == "Decay" => {
+            0.1
+        }
+        _ => 0.01,
+    }
+}
+
+fn display_unit(parameter: &crate::catalog::ParameterDefinition) -> String {
+    match parameter.display_type.as_deref() {
+        Some("time_ms_reverb") => "ms".to_string(),
+        Some("percent") => "%".to_string(),
+        Some("mod_low_cut") | Some("mod_high_cut") => "Hz".to_string(),
+        Some("volume") => "dB".to_string(),
+        _ => String::new(),
+    }
 }

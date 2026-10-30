@@ -21,7 +21,7 @@ enum Command {
     Rename(u8, u8, String),
     Save(u8, u8, String),
     Parameter(u8, u8, f32),
-    Move(u8, u8, u8),
+    SelectBlock(u8, u8),
 }
 
 enum Event {
@@ -41,11 +41,6 @@ enum Event {
         presets: Vec<Preset>,
     },
     OperationFinished(Result<(), String>),
-    MoveFinished {
-        source: u8,
-        destination: u8,
-        result: Result<(), String>,
-    },
     IrLoaded(Result<app::LoadedIr, String>),
     Disconnected,
     Error(String),
@@ -134,27 +129,6 @@ impl UiState {
                     self.selected_preset = None;
                 }
                 Event::OperationFinished(result) => self.error = result.err(),
-                Event::MoveFinished {
-                    source,
-                    destination,
-                    result,
-                } => {
-                    if let Err(error) = result {
-                        if let (Some(a), Some(b)) = (
-                            self.editor
-                                .blocks
-                                .iter()
-                                .position(|block| block.slot == source),
-                            self.editor
-                                .blocks
-                                .iter()
-                                .position(|block| block.slot == destination),
-                        ) {
-                            self.editor.blocks.swap(a, b);
-                        }
-                        self.error = Some(error);
-                    }
-                }
                 Event::IrLoaded(result) => match result {
                     Ok(ir) => self.loaded_ir = Some(ir),
                     Err(error) => self.error = Some(error),
@@ -218,17 +192,26 @@ impl UiState {
         if source_index == target_index {
             return;
         }
+
         if source / 20 != target / 20 {
             self.error = Some("Blocks can only be reordered within one DSP path.".to_string());
             return;
         }
+        if self.state == state::AppState::Connected {
+            self.error = Some(
+                "Block reordering is temporarily disabled until the HX Stomp move exchange is verified."
+                    .to_string(),
+            );
+            return;
+        }
         self.editor.blocks.swap(source_index, target_index);
+    }
+
+    fn select_block(&mut self, slot: u8) {
+        self.editor.selected_block = slot;
         if self.state == state::AppState::Connected {
             self.pending = true;
-            let temporary = ((source / 20) * 20 + 19).min(39);
-            let _ = self
-                .command_tx
-                .send(Command::Move(source, target, temporary));
+            let _ = self.command_tx.send(Command::SelectBlock(slot, 0));
         }
     }
 
@@ -386,6 +369,19 @@ fn PresetPanel(ui: Signal<UiState>) -> Element {
             for preset in presets {
                 button {
                     class: if selected == Some(preset.index) { "preset selected" } else { "preset" },
+                    id: "preset-{preset.index}",
+                    tabindex: "-1",
+                    autofocus: selected == Some(preset.index),
+                    onmounted: move |event| {
+                        if selected == Some(preset.index) {
+                            spawn(async move {
+                                let _ = event
+                                    .data()
+                                    .scroll_to(dioxus::html::ScrollBehavior::Instant)
+                                    .await;
+                            });
+                        }
+                    },
                     onclick: move |_| ui.write().select_preset(preset.index),
                     span { class: "preset-index", "{preset.index:03}" }
                     span { "{preset.name}" }
@@ -403,19 +399,77 @@ fn ChainPanel(ui: Signal<UiState>) -> Element {
     let dragging = state.dragging;
     drop(state);
     let selected_block = blocks.iter().find(|block| block.slot == selected).cloned();
+    let dsp0: Vec<_> = blocks
+        .iter()
+        .filter(|block| block.slot < 20)
+        .cloned()
+        .collect();
+    let dsp1: Vec<_> = blocks
+        .iter()
+        .filter(|block| block.slot >= 20)
+        .cloned()
+        .collect();
+    let split = dsp0
+        .iter()
+        .find(|block| block.model_id.contains("DSPFlowSplit"))
+        .map(|block| block.slot);
+    let merge = dsp0
+        .iter()
+        .find(|block| block.model_id.contains("DSPFlowJoin"))
+        .map(|block| block.slot);
     rsx! {
         section { class: "panel chain-panel",
             div { class: "panel-title", "SIGNAL CHAIN" }
             div { class: "chain-scroll",
-                div { class: "chain",
-                    for (position, block) in blocks.iter().enumerate() {
-                        if position > 0 { div { class: "arrow", "→" } }
-                        BlockTile { ui, block: block.clone(), selected: selected == block.slot, dragging, }
+                if let (Some(split), Some(merge)) = (split, merge) {
+                    {
+                        let branch_boundary = (split + merge) / 2 + 1;
+                        rsx! {
+                            PathRow { ui, label: "MAIN", blocks: dsp0.iter().filter(|block| block.slot <= split).cloned().collect(), selected, dragging }
+                            PathRow { ui, label: "PATH A", blocks: dsp0.iter().filter(|block| block.slot > split && block.slot < branch_boundary).cloned().collect(), selected, dragging }
+                            PathRow { ui, label: "PATH B", blocks: dsp0.iter().filter(|block| block.slot >= branch_boundary && block.slot < merge).cloned().collect(), selected, dragging }
+                            PathRow { ui, label: "MERGE", blocks: dsp0.iter().filter(|block| block.slot >= merge).cloned().collect(), selected, dragging }
+                        }
                     }
+                } else {
+                    PathRow { ui, label: "PATH 1", blocks: dsp0, selected, dragging }
+                }
+                PathRow {
+                    ui,
+                    label: "PATH 2",
+                    blocks: dsp1,
+                    selected,
+                    dragging,
                 }
             }
             if let Some(block) = selected_block {
                 ModelPreview { ui, block }
+            }
+        }
+    }
+}
+
+#[component]
+fn PathRow(
+    ui: Signal<UiState>,
+    label: &'static str,
+    blocks: Vec<state::EditorBlock>,
+    selected: u8,
+    dragging: Option<u8>,
+) -> Element {
+    rsx! {
+        div { class: "path-row",
+            div { class: "path-label", "{label}" }
+            div { class: "chain",
+                for (position, block) in blocks.iter().enumerate() {
+                    if position > 0 { div { class: "arrow", "→" } }
+                    BlockTile {
+                        ui,
+                        block: block.clone(),
+                        selected: selected == block.slot,
+                        dragging,
+                    }
+                }
             }
         }
     }
@@ -435,23 +489,33 @@ fn BlockTile(
         div {
             class: if selected && is_drop_target { "block selected drop-target" } else if selected { "block selected" } else if is_drop_target { "block drop-target" } else { "block" },
             style: "--block-color: {colour};",
-            draggable: "true",
-            ondragstart: move |_| ui.write().dragging = Some(slot),
-            ondragover: move |event| {
+            onmousedown: move |event| {
                 event.prevent_default();
-                ui.write().drop_target = Some(slot);
+                let mut state = ui.write();
+                state.select_block(slot);
+                state.dragging = Some(slot);
             },
-            ondragleave: move |_| if dragging == Some(slot) { ui.write().drop_target = None },
-            ondrop: move |event| {
+            onmouseup: move |event| {
                 event.prevent_default();
                 ui.write().reorder(slot);
             },
-            onclick: move |_| ui.write().editor.selected_block = slot,
+            onmouseenter: move |_| {
+                if dragging.is_some() {
+                    ui.write().drop_target = Some(slot);
+                }
+            },
+            onmouseleave: move |_| if dragging == Some(slot) { ui.write().drop_target = None },
+            ondragend: move |_| {
+                let mut state = ui.write();
+                state.dragging = None;
+                state.drop_target = None;
+            },
+            onclick: move |_| ui.write().select_block(slot),
             div { class: "block-head",
                 span { class: "drag-grip", "⠿" }
                 span { "{slot}" }
             }
-            img { class: "block-icon", src: "{category_icon(&block.model_id)}", alt: "block icon" }
+            img { class: if state::is_flow_model(&block.model_id) { "block-icon flow-icon" } else { "block-icon" }, src: "{category_icon(&block.model_id)}", alt: "block icon" }
             div { class: "block-name", "{block.name}" }
         }
     }
@@ -460,6 +524,7 @@ fn BlockTile(
 #[component]
 fn ModelPreview(ui: Signal<UiState>, block: state::EditorBlock) -> Element {
     let colour = block_colour(&block.model_id);
+    let preview_parameters: Vec<_> = block.parameters.iter().take(6).cloned().collect();
     rsx! {
         div { class: "preview",
             div { class: "preview-content",
@@ -470,17 +535,17 @@ fn ModelPreview(ui: Signal<UiState>, block: state::EditorBlock) -> Element {
                     div { class: "preview-model", "Model preview" }
                 }
                 div { class: "knobs",
-                    for parameter in block.parameters.iter().take(6) {
+                    for parameter in preview_parameters {
                         div { class: "knob-wrap",
-                            div { class: "knob", style: "--knob-color: {colour};", "{parameter.value:.1}" }
+                            div { class: "knob", style: "--knob-color: {colour};",                             "{parameter.value:.1} {parameter.unit}" }
                             input {
                                 class: "knob-input",
                                 r#type: "range",
                                 min: "{parameter.min}",
                                 max: "{parameter.max}",
-                                step: "0.01",
+                                step: "{parameter.step}",
                                 value: "{parameter.value}",
-                                oninput: {
+                                onchange: {
                                     let block_slot = block.slot;
                                     let parameter_index = parameter.index;
                                     move |event| if let Ok(next) = event.value().parse::<f32>() {
@@ -492,7 +557,11 @@ fn ModelPreview(ui: Signal<UiState>, block: state::EditorBlock) -> Element {
                                         }
                                         if state.state == state::AppState::Connected {
                                             state.pending = true;
-                                            let _ = state.command_tx.send(Command::Parameter(block_slot, parameter_index, next));
+                                            let _ = state.command_tx.send(Command::Parameter(
+                                                block_slot,
+                                                parameter_index,
+                                                next / parameter.device_scale,
+                                            ));
                                         }
                                     }
                                 }
@@ -559,6 +628,9 @@ fn Parameter(ui: Signal<UiState>, block_slot: u8, parameter: state::EditorParame
     let value = parameter.value;
     let min = parameter.min;
     let max = parameter.max;
+    let step = parameter.step;
+    let unit = parameter.unit.clone();
+    let device_scale = parameter.device_scale;
     let progress = if max > min {
         ((value - min) / (max - min) * 100.0).clamp(0.0, 100.0)
     } else {
@@ -568,13 +640,13 @@ fn Parameter(ui: Signal<UiState>, block_slot: u8, parameter: state::EditorParame
         div { class: "parameter", style: "--param-color: {colour};",
             div { class: "parameter-row",
                 span { "{parameter.name}" }
-                span { "{value:.2}" }
+                span { "{value:.2} {unit}" }
             }
             input {
                 r#type: "range",
                 min: "{min}",
                 max: "{max}",
-                step: "0.01",
+                step: "{step}",
                 value: "{value}",
                 oninput: move |event| if let Ok(next) = event.value().parse::<f32>() {
                     let mut state = ui.write();
@@ -583,9 +655,16 @@ fn Parameter(ui: Signal<UiState>, block_slot: u8, parameter: state::EditorParame
                     {
                         parameter.value = next;
                     }
+                },
+                onchange: move |event| if let Ok(next) = event.value().parse::<f32>() {
+                    let mut state = ui.write();
                     if state.state == state::AppState::Connected {
                         state.pending = true;
-                        let _ = state.command_tx.send(Command::Parameter(block_slot, parameter_index, next));
+                        let _ = state.command_tx.send(Command::Parameter(
+                            block_slot,
+                            parameter_index,
+                            next / device_scale,
+                        ));
                     }
                 }
             }
@@ -615,7 +694,11 @@ fn Footer(ui: Signal<UiState>) -> Element {
 
 fn category_key(model: &str) -> &'static str {
     let lower = model.to_ascii_lowercase();
-    if lower.contains("preamp") {
+    if lower.contains("split") {
+        "split"
+    } else if lower.contains("join") || lower.contains("merge") {
+        "merge"
+    } else if lower.contains("preamp") {
         "preamp"
     } else if lower.contains("amp") {
         "amp"
@@ -631,7 +714,12 @@ fn category_key(model: &str) -> &'static str {
         "eq"
     } else if lower.contains("filter") {
         "filter"
-    } else if lower.contains("mod") || lower.contains("chorus") || lower.contains("flanger") {
+    } else if lower.contains("mod")
+        || lower.contains("chorus")
+        || lower.contains("flanger")
+        || lower.contains("tremolo")
+        || lower.contains("vibrato")
+    {
         "modulation"
     } else if lower.contains("pitch") || lower.contains("synth") {
         "pitch"
@@ -648,6 +736,8 @@ fn category_key(model: &str) -> &'static str {
 
 fn category_icon(model: &str) -> String {
     let filename = match category_key(model) {
+        "split" => "FX_HX_Category_Split.png",
+        "merge" => "FX_HX_Category_Merge.png",
         "amp" => "FX_HX_Category_Amp.png",
         "preamp" => "FX_HX_Category_Preamp.png",
         "cab" => "FX_HX_Category_Cab.png",
@@ -664,6 +754,12 @@ fn category_icon(model: &str) -> String {
         _ => "FX_HX_Category_None.png",
     };
     let bytes: &[u8] = match filename {
+        "FX_HX_Category_Split.png" => {
+            include_bytes!("../../../res/icons_category/FX_HX_Category_Split.png")
+        }
+        "FX_HX_Category_Merge.png" => {
+            include_bytes!("../../../res/icons_category/FX_HX_Category_Merge.png")
+        }
         "FX_HX_Category_Amp.png" => {
             include_bytes!("../../../res/icons_category/FX_HX_Category_Amp.png")
         }
@@ -827,17 +923,14 @@ fn device_worker(command_rx: Receiver<Command>, event_tx: Sender<Event>) {
                                     .map_err(|error| error.to_string())
                             })
                     }
-                    Command::Move(source, destination, temporary) => {
-                        let result =
-                            with_device(|client| client.move_block(source, destination, temporary))
-                                .map_err(|error| error.to_string());
-                        event_tx
-                            .send(Event::MoveFinished {
-                                source,
-                                destination,
-                                result,
-                            })
+                    Command::SelectBlock(block, model) => {
+                        with_device(|client| client.select_block(block, model))
                             .map_err(|error| error.to_string())
+                            .and_then(|_| {
+                                event_tx
+                                    .send(Event::OperationFinished(Ok(())))
+                                    .map_err(|error| error.to_string())
+                            })
                     }
                 };
                 if let Err(error) = result {

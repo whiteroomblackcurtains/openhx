@@ -34,7 +34,7 @@ OpenHX was built to close that gap.
 - ✅ Rename preset
 - ✅ Change floating-point block parameters (CLI)
 - 🚧 Import and export presets (`.hlx` files)
-- ✅ Reorder blocks by drag and drop
+- 🚧 Reorder blocks by drag and drop (UI interaction is present; hardware protocol validation is pending)
 - 🚧 Toggle individual effect blocks
 - ✅ Load and validate mono or stereo 48 kHz impulse-response WAV files
 - 🚧 Upload impulse responses to device flash
@@ -117,9 +117,11 @@ Windows binary and used for the block tiles and model preview. Parameter control
 loaded from the bundled HX Edit model resources, so each supported block shows its own
 parameter names, ranges, and defaults. Parameter changes are sent to the active edit
 buffer as controls change; preset renaming is persisted immediately. Use the **Save**
-button to write the edited active buffer to the selected preset slot. Blocks use native
-HTML drag-and-drop targets and can be reordered within the same DSP path; the move is
-sent to the device through the edit buffer.
+button to write the edited active buffer to the selected preset slot. Clicking a block
+selects it on the hardware using the verified HX Edit block-selection exchange. Dragging
+provides the UI interaction, but connected-device block reordering is temporarily
+disabled until the separate HX Edit move exchange is captured and verified; this prevents
+an unsafe command from causing USB timeouts.
 Preset block discovery and current parameter values are read from the device edit buffer.
 Routing, snapshots, and the remaining editor workflows are still being expanded.
 

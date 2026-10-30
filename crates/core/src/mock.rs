@@ -105,6 +105,11 @@ impl DeviceClient for MockClient {
         Ok(())
     }
 
+    fn select_block(&self, block: u8, model: u8) -> Result<(), HxError> {
+        eprintln!("[mock] select_block(block={block}, model={model}) — OK");
+        Ok(())
+    }
+
     fn set_parameter(
         &self,
         block: u8,

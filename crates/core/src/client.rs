@@ -59,6 +59,9 @@ pub trait DeviceClient: Send {
     /// Moves a block between slots using an empty temporary slot.
     fn move_block(&self, source: u8, destination: u8, temporary: u8) -> Result<(), HxError>;
 
+    /// Selects a block in the device's edit cursor.
+    fn select_block(&self, block: u8, model: u8) -> Result<(), HxError>;
+
     /// Sets a floating-point parameter in a block of the active preset.
     ///
     /// `block` and `parameter` are zero-based device indices. `model` is `0`

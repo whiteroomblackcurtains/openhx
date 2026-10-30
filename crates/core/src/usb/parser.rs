@@ -196,6 +196,29 @@ fn find_map_value(map: &[(rmpv::Value, rmpv::Value)], key: i64) -> Option<&rmpv:
         .map(|(_, value)| value)
 }
 
+fn find_nested_integer(value: &rmpv::Value, key: i64) -> Option<u16> {
+    if let Some(map) = value.as_map() {
+        if let Some(found) = find_map_value(map, key)
+            .and_then(rmpv::Value::as_u64)
+            .and_then(|value| u16::try_from(value).ok())
+        {
+            return Some(found);
+        }
+        for (_, child) in map {
+            if let Some(found) = find_nested_integer(child, key) {
+                return Some(found);
+            }
+        }
+    } else if let Some(array) = value.as_array() {
+        for child in array {
+            if let Some(found) = find_nested_integer(child, key) {
+                return Some(found);
+            }
+        }
+    }
+    None
+}
+
 fn decode_preset_blocks(preset: &rmpv::Value) -> Result<PresetDetails, HxError> {
     let mut blocks = Vec::new();
     for dsp in 0..2i64 {
@@ -217,36 +240,30 @@ fn decode_preset_blocks(preset: &rmpv::Value) -> Result<PresetDetails, HxError> 
             else {
                 continue;
             };
-            if kind != 6 && kind != 7 {
-                continue;
-            }
             let content = slot
                 .as_map()
                 .and_then(|map| find_map_value(map, 20))
                 .and_then(rmpv::Value::as_map);
-            let (model_index, paired_model_index, parameter_key) = if kind == 7 {
-                (
-                    content
-                        .and_then(|map| find_map_value(map, 8))
-                        .and_then(rmpv::Value::as_u64)
-                        .and_then(|value| u16::try_from(value).ok()),
-                    None,
-                    7,
-                )
-            } else {
-                let meta = content
-                    .and_then(|map| find_map_value(map, 24))
-                    .and_then(rmpv::Value::as_map);
-                (
-                    meta.and_then(|map| find_map_value(map, 25))
-                        .and_then(rmpv::Value::as_u64)
-                        .and_then(|value| u16::try_from(value).ok()),
-                    meta.and_then(|map| find_map_value(map, 26))
-                        .and_then(rmpv::Value::as_u64)
-                        .and_then(|value| u16::try_from(value).ok()),
-                    11,
-                )
-            };
+            let meta = content
+                .and_then(|map| find_map_value(map, 24))
+                .and_then(rmpv::Value::as_map);
+            let model_index = content
+                .and_then(|map| find_nested_integer(&rmpv::Value::Map(map.to_vec()), 8))
+                .or_else(|| {
+                    content.and_then(|map| find_nested_integer(&rmpv::Value::Map(map.to_vec()), 25))
+                })
+                .or_else(|| {
+                    content.and_then(|map| find_nested_integer(&rmpv::Value::Map(map.to_vec()), 26))
+                });
+            let paired_model_index = meta
+                .and_then(|map| find_map_value(map, 26))
+                .and_then(rmpv::Value::as_u64)
+                .and_then(|value| u16::try_from(value).ok());
+            if model_index.is_none() {
+                tracing::debug!(dsp, index, kind, "skipping slot without model identity");
+                continue;
+            }
+            let parameter_key = if matches!(kind, 2 | 3 | 7) { 7 } else { 11 };
             let parameters = decode_parameters(content.map(|value| &**value), parameter_key);
             let paired_parameters = decode_parameters(content.map(|value| &**value), 12);
             blocks.push(PresetBlock {

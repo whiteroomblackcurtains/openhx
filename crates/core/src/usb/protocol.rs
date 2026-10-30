@@ -317,6 +317,38 @@ mod tests {
         assert_eq!(pkt[36], preset_idx, "preset index mismatch");
     }
 
+    #[test]
+    fn build_block_selection_request_uses_hx_edit_transaction_and_target() {
+        let packet = build_edit_request(
+            0x04,
+            0x0000_1009,
+            1009,
+            78,
+            rmpv::Value::Map(vec![
+                (rmpv::Value::from(98i64), rmpv::Value::from(4i64)),
+                (rmpv::Value::from(26i64), rmpv::Value::from(0i64)),
+            ]),
+        );
+        let payload = rmpv::decode::read_value(&mut &packet[24..]).expect("valid edit request");
+
+        assert_eq!(packet[SEQ_OFFSET], 0x04);
+        assert_eq!(packet[CMD_OFFSET], 0x04);
+        assert_eq!(
+            payload,
+            rmpv::Value::Map(vec![
+                (rmpv::Value::from(102i64), rmpv::Value::from(1009i64)),
+                (rmpv::Value::from(100i64), rmpv::Value::from(78i64)),
+                (
+                    rmpv::Value::from(101i64),
+                    rmpv::Value::Map(vec![
+                        (rmpv::Value::from(98i64), rmpv::Value::from(4i64)),
+                        (rmpv::Value::from(26i64), rmpv::Value::from(0i64)),
+                    ]),
+                ),
+            ])
+        );
+    }
+
     // Static Packets & Sequences
 
     #[test]

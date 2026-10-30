@@ -10,6 +10,7 @@ use crate::{
 };
 use openhx_i18n::fl;
 use rusb::{Context, DeviceHandle, UsbContext};
+use std::cell::Cell;
 use std::time::Duration;
 
 /// Maximum number of attempts to initialize the USB session before giving up.
@@ -71,6 +72,10 @@ fn fmt_byte_at(buf: &[u8], n: usize, offset: usize) -> String {
 pub struct Client {
     handle: DeviceHandle<Context>,
     profile: &'static DeviceProfile,
+    block_select_session: Cell<bool>,
+    block_select_sequence: Cell<u8>,
+    block_select_transaction: Cell<u16>,
+    block_select_argument: Cell<u32>,
 }
 
 impl Client {
@@ -132,7 +137,14 @@ impl Client {
         handle.clear_halt(EP_OUT)?;
         handle.clear_halt(EP_IN)?;
 
-        let client = Self { handle, profile };
+        let client = Self {
+            handle,
+            profile,
+            block_select_session: Cell::new(false),
+            block_select_sequence: Cell::new(0x04),
+            block_select_transaction: Cell::new(1009),
+            block_select_argument: Cell::new(0x0000_1009),
+        };
 
         // Discard data buffered by a prior unclosed session so it cannot
         // misalign the subsequent request/response pairing.
@@ -280,6 +292,8 @@ impl Client {
         timeout: Duration,
     ) -> Result<(), HxError> {
         let mut buf = vec![0u8; 512];
+        self.block_select_session.set(false);
+        self.drain_stale_data();
 
         for packet in edit_channel_handshake() {
             let seq = packet[SEQ_BYTE_OFFSET];
@@ -754,11 +768,20 @@ impl DeviceClient for Client {
             return Err(HxError::protocol("block move slots must be distinct"));
         }
 
-        for (source_slot, destination_slot) in [
+        for (step, (source_slot, destination_slot)) in [
             (source, temporary),
             (destination, source),
             (temporary, destination),
-        ] {
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            tracing::debug!(
+                step,
+                source_slot,
+                destination_slot,
+                "moving block through temporary slot"
+            );
             self.run_edit_session(
                 1,
                 78,
@@ -767,7 +790,12 @@ impl DeviceClient for Client {
                     (rmpv::Value::from(26i64), rmpv::Value::from(0i64)),
                 ]),
                 Duration::from_millis(TIMEOUT_MS),
-            )?;
+            )
+            .map_err(|error| {
+                HxError::protocol(format!(
+                    "move step {step} remove {source_slot}->{destination_slot} failed: {error}"
+                ))
+            })?;
             self.run_edit_session(
                 1,
                 43,
@@ -779,9 +807,98 @@ impl DeviceClient for Client {
                     ),
                 ]),
                 Duration::from_millis(TIMEOUT_MS),
-            )?;
+            )
+            .map_err(|error| {
+                HxError::protocol(format!(
+                    "move step {step} insert {source_slot}->{destination_slot} failed: {error}"
+                ))
+            })?;
         }
         Ok(())
+    }
+
+    fn select_block(&self, block: u8, model: u8) -> Result<(), HxError> {
+        if block >= 40 {
+            return Err(HxError::protocol("block slot must be below 40"));
+        }
+        if model > 1 {
+            return Err(HxError::protocol("model must be 0 (main) or 1 (paired)"));
+        }
+        let timeout = Duration::from_millis(TIMEOUT_MS);
+        let mut buf = vec![0u8; 512];
+
+        if !self.block_select_session.get() {
+            self.drain_stale_data();
+            self.block_select_sequence.set(0x04);
+            self.block_select_transaction.set(1009);
+            self.block_select_argument.set(0x0000_1009);
+            for packet in edit_channel_handshake() {
+                let seq = packet[SEQ_BYTE_OFFSET];
+                let handshake_result = (|| {
+                    self.handle
+                        .write_bulk(EP_OUT, &packet, timeout)
+                        .map_err(HxError::Usb)?;
+                    self.read_for_seq(seq, &mut buf, timeout)?;
+                    Ok::<(), HxError>(())
+                })();
+                if let Err(error) = handshake_result {
+                    self.block_select_session.set(false);
+                    return Err(error);
+                }
+            }
+            self.block_select_session.set(true);
+        }
+
+        let sequence = self.block_select_sequence.get();
+        let transaction = self.block_select_transaction.get();
+        let argument = self.block_select_argument.get();
+        let request = build_edit_request(
+            sequence,
+            argument,
+            transaction,
+            78,
+            rmpv::Value::Map(vec![
+                (rmpv::Value::from(98i64), rmpv::Value::from(block)),
+                (rmpv::Value::from(26i64), rmpv::Value::from(model)),
+            ]),
+        );
+
+        let result = self
+            .handle
+            .write_bulk(EP_OUT, &request, timeout)
+            .map_err(HxError::Usb)
+            .and_then(|_| {
+                self.read_for_seq(sequence, &mut buf, timeout)
+                    .and_then(|n| parse_edit_response(&buf[..n]))
+            });
+
+        match result {
+            Ok(()) => {
+                let next_sequence = sequence.wrapping_add(1);
+                let next_argument = argument.wrapping_add(0x11);
+                let chunk_request = build_edit_chunk_request(next_sequence, next_argument);
+                if let Err(error) = self
+                    .handle
+                    .write_bulk(EP_OUT, &chunk_request, timeout)
+                    .map_err(HxError::Usb)
+                {
+                    self.block_select_session.set(false);
+                    self.drain_stale_data();
+                    return Err(error);
+                }
+                self.block_select_sequence.set(sequence.wrapping_add(4));
+                self.block_select_transaction
+                    .set(transaction.wrapping_add(1));
+                self.block_select_argument.set(next_argument);
+                self.drain_stale_data();
+                Ok(())
+            }
+            Err(error) => {
+                self.block_select_session.set(false);
+                self.drain_stale_data();
+                Err(error)
+            }
+        }
     }
 
     fn set_parameter(
@@ -829,33 +946,31 @@ fn parse_current_preset_identity_response(response: &[u8]) -> Result<Option<u8>,
         .ok_or_else(|| HxError::protocol("edit response TLV is truncated"))?;
     let mut cursor = std::io::Cursor::new(&body[8..end]);
     let value = rmpv::decode::read_value(&mut cursor)?;
-    let candidate_maps = std::iter::once(value.clone()).chain(
-        value
-            .as_map()
-            .into_iter()
-            .flat_map(|map| {
-                map.iter()
-                    .filter_map(|(key, candidate)| (key.as_i64() == Some(104)).then_some(candidate))
-            })
-            .cloned(),
-    );
-
-    for candidate in candidate_maps {
-        let Some(map) = candidate.as_map() else {
-            continue;
-        };
-        if let Some(index) = map.iter().find_map(|(key, val)| {
-            if key.as_i64() == Some(108) {
-                val.as_i64().and_then(|value| u8::try_from(value).ok())
-            } else {
-                None
+    fn find_index(value: &rmpv::Value) -> Option<u8> {
+        if let Some(map) = value.as_map() {
+            if let Some(index) = map.iter().find_map(|(key, value)| {
+                (key.as_i64() == Some(108))
+                    .then(|| value.as_i64().and_then(|value| u8::try_from(value).ok()))
+                    .flatten()
+            }) {
+                return Some(index);
             }
-        }) {
-            return Ok(Some(index));
+            for (_, child) in map {
+                if let Some(index) = find_index(child) {
+                    return Some(index);
+                }
+            }
+        } else if let Some(array) = value.as_array() {
+            for child in array {
+                if let Some(index) = find_index(child) {
+                    return Some(index);
+                }
+            }
         }
+        None
     }
 
-    Ok(None)
+    Ok(find_index(&value))
 }
 
 fn parse_edit_response(response: &[u8]) -> Result<(), HxError> {
