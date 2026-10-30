@@ -43,6 +43,13 @@ pub trait DeviceClient: Send {
     /// Reads the complete edit buffer for the currently selected preset.
     fn read_current_preset(&self) -> Result<PresetDetails, HxError>;
 
+    /// Returns the currently active preset slot, if the device reported one.
+    ///
+    /// Some device families expose the active preset as a persistent identity in
+    /// the edit-channel metadata; others do not. The method is best-effort and
+    /// returns `None` when the device does not report a slot value.
+    fn read_current_preset_index(&self) -> Result<Option<u8>, HxError>;
+
     /// Renames a stored preset without changing its signal-chain contents.
     fn rename_preset(&self, setlist: u8, preset: u8, name: &str) -> Result<(), HxError>;
 

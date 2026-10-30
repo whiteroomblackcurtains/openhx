@@ -242,14 +242,25 @@ fn signal_chain(app: &App) -> Element<'_, Message> {
             rule::horizontal(1),
             pane_grid(&app.block_panes, |_pane, slot, _maximized| {
                 let block = app.editor.blocks.iter().find(|block| block.slot == *slot);
-                pane_grid::Content::new(match block {
-                    Some(_) => Element::from(text("")),
-                    None => Element::from(text("No block")),
-                })
-                .title_bar(pane_grid::TitleBar::new(match block {
+                let body = match block {
                     Some(block) => block_card(block, app.editor.selected_block == block.slot),
                     None => text("No block").into(),
-                }))
+                };
+                let title: Element<'_, Message> = match block {
+                    Some(block) => row![text("⋮⋮").size(10), text(block.model.clone()).size(10),]
+                        .spacing(6)
+                        .align_y(Alignment::Center)
+                        .into(),
+                    None => text("No block").size(10).into(),
+                };
+
+                pane_grid::Content::new(
+                    container(body)
+                        .padding(6)
+                        .width(Length::Fill)
+                        .height(Length::Fill),
+                )
+                .title_bar(pane_grid::TitleBar::new(title).padding(4))
             })
             .on_click(|pane| {
                 Message::BlockSelected(app.block_panes.get(pane).copied().unwrap_or_default())
@@ -286,6 +297,19 @@ fn signal_chain(app: &App) -> Element<'_, Message> {
 
 fn block_card(block: &EditorBlock, selected: bool) -> Element<'_, Message> {
     let color = block_color(&block.model_id);
+    let slot = block.slot;
+    let move_left = button(text("←").size(10))
+        .on_press(Message::MoveBlock {
+            slot,
+            direction: -1,
+        })
+        .padding([4, 6])
+        .style(button::secondary);
+    let move_right = button(text("→").size(10))
+        .on_press(Message::MoveBlock { slot, direction: 1 })
+        .padding([4, 6])
+        .style(button::secondary);
+
     container(
         column![
             container(
@@ -306,12 +330,15 @@ fn block_card(block: &EditorBlock, selected: bool) -> Element<'_, Message> {
                 .width(Length::Fill)
                 .align_x(iced::alignment::Horizontal::Center)
                 .wrapping(text::Wrapping::WordOrGlyph),
+            row![move_left, move_right]
+                .spacing(4)
+                .align_y(Alignment::Center),
             text(format!("Slot {}", block.slot)).size(10),
         ]
         .spacing(5)
         .align_x(Alignment::Center),
     )
-    .width(Length::Fixed(140.0))
+    .width(Length::Fixed(150.0))
     .padding(0)
     .style(move |_theme: &Theme| container::Style {
         background: Some(if selected {

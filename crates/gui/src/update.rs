@@ -12,6 +12,7 @@ pub fn handle_message(app: &mut App, message: Message) -> Task<Message> {
             setlists,
             presets,
             details,
+            selected_preset,
         } => {
             info!(
                 "Device connected successfully: {name} ({} setlist(s))",
@@ -23,7 +24,8 @@ pub fn handle_message(app: &mut App, message: Message) -> Task<Message> {
             app.presets = presets;
             app.state = AppState::Connected;
             app.error_log = None;
-            app.selected_preset = None;
+            app.selected_preset = selected_preset;
+            app.pending_preset_selection = None;
             app.editor = crate::state::EditorState::default();
             if let Err(error) = app.editor.load_details("Current preset", &details) {
                 error!("Current preset model decode failed: {error}");
@@ -42,6 +44,7 @@ pub fn handle_message(app: &mut App, message: Message) -> Task<Message> {
             app.setlist = 0;
             app.presets.clear();
             app.selected_preset = None;
+            app.pending_preset_selection = None;
             app.editor = crate::state::EditorState::default();
             Task::none()
         }
@@ -51,6 +54,7 @@ pub fn handle_message(app: &mut App, message: Message) -> Task<Message> {
             app.setlists.clear();
             app.presets.clear();
             app.selected_preset = None;
+            app.pending_preset_selection = None;
             app.editor = crate::state::EditorState::offline_demo();
             app.sync_block_panes();
             app.error_log = None;
@@ -88,6 +92,7 @@ pub fn handle_message(app: &mut App, message: Message) -> Task<Message> {
             app.setlist = setlist;
             app.presets = presets;
             app.selected_preset = None;
+            app.pending_preset_selection = None;
             Task::none()
         }
         Message::SetlistLoadFailed(setlist, err) => {
@@ -101,8 +106,14 @@ pub fn handle_message(app: &mut App, message: Message) -> Task<Message> {
             Task::none()
         }
         Message::PresetSelected(index) => {
+            if app.pending_preset_selection.is_some() {
+                info!("Ignoring preset selection while another selection is in flight: {index:03}");
+                return Task::none();
+            }
+
             let setlist = app.setlist;
             info!("Preset selected: setlist {setlist}, slot {index:03}");
+            app.pending_preset_selection = Some(index);
             app.selected_preset = Some(index);
             let name = app
                 .presets
@@ -127,7 +138,59 @@ pub fn handle_message(app: &mut App, message: Message) -> Task<Message> {
                 move |result| Message::PresetLoaded { index, result },
             )
         }
+        Message::MoveBlock { slot, direction } => {
+            let Some(index) = app
+                .editor
+                .blocks
+                .iter()
+                .position(|block| block.slot == slot)
+            else {
+                return Task::none();
+            };
+            let target_index = (index as isize + direction as isize)
+                .clamp(0, app.editor.blocks.len() as isize - 1)
+                as usize;
+            if index == target_index {
+                return Task::none();
+            }
+
+            let source_slot = app.editor.blocks[index].slot;
+            let destination_slot = app.editor.blocks[target_index].slot;
+            app.editor.blocks.swap(index, target_index);
+            app.block_panes = pane_grid::State::new(0).0;
+            app.sync_block_panes();
+
+            if app.state == AppState::Offline {
+                return Task::none();
+            }
+
+            Task::perform(
+                async move {
+                    tokio::task::spawn_blocking(move || {
+                        with_device(|client| {
+                            let path = source_slot / 20;
+                            if path != destination_slot / 20 {
+                                return Err(HxError::Protocol(
+                                    "blocks can only move within one DSP path".to_string(),
+                                ));
+                            }
+                            let temporary = (path * 20 + 19).min(39);
+                            client.move_block(source_slot, destination_slot, temporary)
+                        })
+                    })
+                    .await
+                    .unwrap_or_else(|e| Err(HxError::Protocol(e.to_string())))
+                },
+                move |result| Message::BlockMoveFinished {
+                    source: source_slot,
+                    destination: destination_slot,
+                    temporary: (source_slot / 20 * 20 + 19).min(39),
+                    result: result.map_err(|error| error.to_string()),
+                },
+            )
+        }
         Message::PresetLoaded { index, result } => {
+            app.pending_preset_selection = None;
             if app.selected_preset != Some(index) {
                 info!("Ignoring stale load result for preset {index:03}");
                 return Task::none();

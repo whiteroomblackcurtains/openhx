@@ -6,7 +6,7 @@ pub enum AppState {
     Error,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct EditorParameter {
     pub index: u8,
     pub symbolic_id: String,
@@ -16,7 +16,7 @@ pub struct EditorParameter {
     pub max: f32,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct EditorBlock {
     pub slot: u8,
     pub model_id: String,

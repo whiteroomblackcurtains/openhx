@@ -74,6 +74,10 @@ impl DeviceClient for MockClient {
         Ok(PresetDetails { blocks: Vec::new() })
     }
 
+    fn read_current_preset_index(&self) -> Result<Option<u8>, HxError> {
+        Ok(Some(0))
+    }
+
     fn rename_preset(&self, setlist: u8, preset: u8, name: &str) -> Result<(), HxError> {
         self.profile().validate_setlist(setlist)?;
         if u16::from(preset) >= self.profile().preset_count {

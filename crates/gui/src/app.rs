@@ -26,6 +26,7 @@ pub struct App {
     pub presets: Vec<Preset>,
     pub error_log: Option<String>,
     pub selected_preset: Option<u8>,
+    pub pending_preset_selection: Option<u8>,
     pub editor: crate::state::EditorState,
     pub panes: pane_grid::State<EditorPane>,
     pub block_panes: pane_grid::State<u8>,
@@ -42,6 +43,7 @@ impl Default for App {
             presets: Vec::new(),
             error_log: None,
             selected_preset: None,
+            pending_preset_selection: None,
             editor: crate::state::EditorState::default(),
             panes: pane_grid::State::with_configuration(pane_grid::Configuration::Split {
                 axis: pane_grid::Axis::Vertical,

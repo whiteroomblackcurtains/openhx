@@ -611,6 +611,80 @@ impl DeviceClient for Client {
         self.read_current_preset_impl()
     }
 
+    fn read_current_preset_index(&self) -> Result<Option<u8>, HxError> {
+        let timeout = Duration::from_millis(TIMEOUT_MS);
+        let mut buf = vec![0u8; 8 * 1024];
+        self.drain_stale_data();
+
+        let mut handshake = || -> Result<(), HxError> {
+            for packet in edit_channel_handshake() {
+                let seq = packet[SEQ_BYTE_OFFSET];
+                self.handle.write_bulk(EP_OUT, &packet, timeout)?;
+                self.read_for_seq(seq, &mut buf, timeout)?;
+            }
+            Ok(())
+        };
+
+        let request = |sequence: u8, transaction: u16, operation: i64, target: rmpv::Value| {
+            build_edit_request(sequence, 0x0000_1009, transaction, operation, target)
+        };
+
+        let mut last_response = None;
+        if let Err(error) = handshake() {
+            return match error {
+                HxError::Usb(rusb::Error::Timeout)
+                | HxError::Protocol(_)
+                | HxError::MsgPack(_)
+                | HxError::InvalidStreamMarker
+                | HxError::DeviceNotFound => Ok(None),
+                _ => Err(error),
+            };
+        }
+
+        for (index, (transaction, operation, target)) in [
+            (1, 76, rmpv::Value::Map(Vec::new())),
+            (
+                2,
+                24,
+                rmpv::Value::Map(vec![(rmpv::Value::from(118i64), rmpv::Value::from(128i64))]),
+            ),
+            (3, 23, rmpv::Value::Nil),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let sequence = 0x04u8 + index as u8;
+            let packet = request(sequence, transaction, operation, target);
+            match self.handle.write_bulk(EP_OUT, &packet, timeout) {
+                Ok(_) => {}
+                Err(rusb::Error::Timeout) => return Ok(None),
+                Err(err) => return Err(HxError::Usb(err)),
+            }
+
+            let n = match self.read_for_seq(sequence, &mut buf, timeout) {
+                Ok(len) => len,
+                Err(HxError::Usb(rusb::Error::Timeout)) => return Ok(None),
+                Err(err) => return Err(err),
+            };
+
+            if let Err(error) = parse_edit_response(&buf[..n]) {
+                match error {
+                    HxError::Usb(rusb::Error::Timeout)
+                    | HxError::Protocol(_)
+                    | HxError::MsgPack(_)
+                    | HxError::InvalidStreamMarker => return Ok(None),
+                    _ => return Err(error),
+                }
+            }
+            last_response = Some(buf[..n].to_vec());
+        }
+
+        match last_response.as_deref() {
+            Some(response) => parse_current_preset_identity_response(response),
+            None => Ok(None),
+        }
+    }
+
     fn rename_preset(&self, setlist: u8, preset: u8, name: &str) -> Result<(), HxError> {
         self.profile.validate_setlist(setlist)?;
         if u16::from(preset) >= self.profile.preset_count {
@@ -736,6 +810,52 @@ impl DeviceClient for Client {
             Duration::from_millis(TIMEOUT_MS),
         )
     }
+}
+
+fn parse_current_preset_identity_response(response: &[u8]) -> Result<Option<u8>, HxError> {
+    if response.len() < 24 {
+        return Err(HxError::protocol("edit response is too short"));
+    }
+
+    let body = &response[16..];
+    if body.len() < 8 {
+        return Err(HxError::protocol("edit response has no TLV body"));
+    }
+
+    let len = u32::from_le_bytes(body[4..8].try_into().unwrap()) as usize;
+    let end = 8usize
+        .checked_add(len)
+        .filter(|end| *end <= body.len())
+        .ok_or_else(|| HxError::protocol("edit response TLV is truncated"))?;
+    let mut cursor = std::io::Cursor::new(&body[8..end]);
+    let value = rmpv::decode::read_value(&mut cursor)?;
+    let candidate_maps = std::iter::once(value.clone()).chain(
+        value
+            .as_map()
+            .into_iter()
+            .flat_map(|map| {
+                map.iter()
+                    .filter_map(|(key, candidate)| (key.as_i64() == Some(104)).then_some(candidate))
+            })
+            .cloned(),
+    );
+
+    for candidate in candidate_maps {
+        let Some(map) = candidate.as_map() else {
+            continue;
+        };
+        if let Some(index) = map.iter().find_map(|(key, val)| {
+            if key.as_i64() == Some(108) {
+                val.as_i64().and_then(|value| u8::try_from(value).ok())
+            } else {
+                None
+            }
+        }) {
+            return Ok(Some(index));
+        }
+    }
+
+    Ok(None)
 }
 
 fn parse_edit_response(response: &[u8]) -> Result<(), HxError> {

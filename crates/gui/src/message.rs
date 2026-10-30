@@ -7,6 +7,7 @@ pub enum Message {
         setlists: Vec<Setlist>,
         presets: Vec<Preset>,
         details: PresetDetails,
+        selected_preset: Option<u8>,
     },
     DeviceDisconnected,
     EnterOfflineMode,
@@ -19,6 +20,12 @@ pub enum Message {
     /// Loading a setlist failed; the previous list stays on screen.
     SetlistLoadFailed(u8, String),
     PresetSelected(u8),
+    // Reorder the block list in-place within a DSP path. This is the reliable
+    // fallback when pane-grid drag gestures are not firing consistently.
+    MoveBlock {
+        slot: u8,
+        direction: i8,
+    },
     PresetLoaded {
         index: u8,
         result: Result<(String, PresetDetails), String>,

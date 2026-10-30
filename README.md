@@ -110,14 +110,16 @@ openhx-cli preset set-parameter --block <BLOCK> --parameter <PARAMETER> --value 
 openhx
 ```
 
-The GUI includes an HX Edit-inspired workspace with a preset browser, signal-chain
-canvas, block parameter inspector, snapshot strip, and footswitch controls. Parameter
-controls are loaded from the bundled HX Edit model resources, so each supported block
-shows its own parameter names, ranges, and defaults. Parameter changes are sent to the
-active edit buffer when a control is released; preset renaming is persisted immediately.
-Use the **Save** button to write the edited active buffer to the selected preset slot.
-Blocks can be dragged to reorder them within the same DSP path; the move is sent to the
-device through the edit buffer.
+The GUI uses Dioxus Desktop with an HX Edit-inspired dark workspace: a preset browser,
+compact colour-coded signal-chain tiles, model artwork, a selected-block preview, and a
+resizable parameter inspector. The bundled HX Edit category artwork is embedded in the
+Windows binary and used for the block tiles and model preview. Parameter controls are
+loaded from the bundled HX Edit model resources, so each supported block shows its own
+parameter names, ranges, and defaults. Parameter changes are sent to the active edit
+buffer as controls change; preset renaming is persisted immediately. Use the **Save**
+button to write the edited active buffer to the selected preset slot. Blocks use native
+HTML drag-and-drop targets and can be reordered within the same DSP path; the move is
+sent to the device through the edit buffer.
 Preset block discovery and current parameter values are read from the device edit buffer.
 Routing, snapshots, and the remaining editor workflows are still being expanded.
 

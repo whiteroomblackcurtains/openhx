@@ -24,19 +24,21 @@ pub fn usb_poll() -> impl futures::Stream<Item = Message> {
                     let setlists = client.list_setlists()?;
                     let presets = client.read_presets()?;
                     let details = client.read_current_preset()?;
-                    Ok((name, setlists, presets, details))
+                    let selected_preset = client.read_current_preset_index().unwrap_or(None);
+                    Ok((name, setlists, presets, details, selected_preset))
                 })
             })
             .await;
 
             match result {
-                Ok(Ok((name, setlists, presets, details))) => {
+                Ok(Ok((name, setlists, presets, details, selected_preset))) => {
                     let _ = output
                         .send(Message::DeviceDetected {
                             name,
                             setlists,
                             presets,
                             details,
+                            selected_preset,
                         })
                         .await;
                     break;
