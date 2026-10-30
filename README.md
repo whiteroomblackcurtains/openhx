@@ -34,9 +34,11 @@ OpenHX was built to close that gap.
 - ✅ Rename preset
 - ✅ Change floating-point block parameters (CLI)
 - 🚧 Import and export presets (`.hlx` files)
-- 🚧 Reorder blocks
+- ✅ Reorder blocks by drag and drop
 - 🚧 Toggle individual effect blocks
-- 🚧 Manage Impulse Responses (IRs)
+- ✅ Load and validate mono 48 kHz impulse-response WAV files
+- 🚧 Upload impulse responses to device flash
+- ✅ Offline preset editing workspace
 - 🚧 Configure Global EQ
 - ✅ HX Edit-inspired GUI with model-specific block parameters
 - 🚧 Support for multiple HX devices
