@@ -179,6 +179,10 @@ pub fn handle_message(app: &mut App, message: Message) -> Task<Message> {
             }
             Task::none()
         }
+        Message::PaneResized(event) => {
+            app.panes.resize(event.split, event.ratio);
+            Task::none()
+        }
         Message::BlockSelected(block) => {
             app.editor.selected_block = block;
             Task::none()

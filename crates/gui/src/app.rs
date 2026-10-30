@@ -1,6 +1,12 @@
 use crate::{message::Message, state::AppState, update, view, worker};
-use iced::{Subscription, Task};
+use iced::{Subscription, Task, widget::pane_grid};
 use openhx_core::{Preset, Setlist};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EditorPane {
+    Workspace,
+    Inspector,
+}
 
 pub struct App {
     pub state: AppState,
@@ -13,6 +19,7 @@ pub struct App {
     pub error_log: Option<String>,
     pub selected_preset: Option<u8>,
     pub editor: crate::state::EditorState,
+    pub panes: pane_grid::State<EditorPane>,
 }
 
 impl Default for App {
@@ -26,6 +33,12 @@ impl Default for App {
             error_log: None,
             selected_preset: None,
             editor: crate::state::EditorState::default(),
+            panes: pane_grid::State::with_configuration(pane_grid::Configuration::Split {
+                axis: pane_grid::Axis::Vertical,
+                ratio: 0.72,
+                a: Box::new(pane_grid::Configuration::Pane(EditorPane::Workspace)),
+                b: Box::new(pane_grid::Configuration::Pane(EditorPane::Inspector)),
+            }),
         }
     }
 }

@@ -1,11 +1,11 @@
 use crate::{
-    app::App,
+    app::{App, EditorPane},
     message::Message,
     state::{AppState, EditorBlock, EditorParameter},
 };
 use iced::widget::{
-    button, column, container, pick_list, progress_bar, row, rule, scrollable, slider, space, text,
-    text_input,
+    button, column, container, pane_grid, pick_list, progress_bar, row, rule, scrollable, slider,
+    space, text, text_input,
 };
 use iced::{Alignment, Color, Element, Length, Padding, Theme};
 use openhx_core::Setlist;
@@ -69,24 +69,27 @@ pub fn view(app: &App) -> Element<'_, Message> {
 
 fn editor_workspace(app: &App) -> Element<'_, Message> {
     let header = top_bar(app);
-    let sidebar = preset_browser(app);
-    let chain = signal_chain(app);
-    let inspector = parameter_inspector(app);
     let footer = snapshot_bar(app);
-
-    column![
-        header,
-        rule::horizontal(1),
-        row![sidebar, chain, inspector]
-            .spacing(10)
-            .height(Length::Fill)
-            .width(Length::Fill),
-        footer,
-    ]
-    .spacing(10)
+    let panes = pane_grid(&app.panes, |_pane, pane, _maximized| {
+        let content: Element<'_, Message> = match pane {
+            EditorPane::Workspace => row![preset_browser(app), signal_chain(app)]
+                .spacing(10)
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .into(),
+            EditorPane::Inspector => parameter_inspector(app),
+        };
+        pane_grid::Content::new(content)
+    })
+    .on_resize(8, Message::PaneResized)
     .width(Length::Fill)
-    .height(Length::Fill)
-    .into()
+    .height(Length::Fill);
+
+    column![header, rule::horizontal(1), panes, footer,]
+        .spacing(10)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .into()
 }
 
 fn top_bar(app: &App) -> Element<'_, Message> {
@@ -101,7 +104,7 @@ fn top_bar(app: &App) -> Element<'_, Message> {
         }),
     )
     .padding([5, 10])
-    .style(|_theme: &Theme| container::Style {
+    .style(move |_theme: &Theme| container::Style {
         background: Some(Color::from_rgb(0.08, 0.13, 0.1).into()),
         border: iced::Border {
             color: Color::from_rgb(0.2, 0.55, 0.3),
@@ -202,7 +205,12 @@ fn preset_browser(app: &App) -> Element<'_, Message> {
         list = list.push(item);
     }
 
-    panel(scrollable(list).height(Length::Fill), 205.0).into()
+    panel(
+        scrollable(list).height(Length::Fill),
+        Color::from_rgb(0.22, 0.3, 0.35),
+    )
+    .width(Length::Fixed(205.0))
+    .into()
 }
 
 fn signal_chain(app: &App) -> Element<'_, Message> {
@@ -245,7 +253,7 @@ fn signal_chain(app: &App) -> Element<'_, Message> {
     .padding(12)
     .width(Length::FillPortion(6))
     .height(Length::Fill)
-    .style(|_theme: &Theme| container::Style {
+    .style(move |_theme: &Theme| container::Style {
         background: Some(Color::from_rgb(0.07, 0.07, 0.08).into()),
         border: iced::Border {
             color: Color::from_rgb(0.2, 0.2, 0.23),
@@ -259,29 +267,33 @@ fn signal_chain(app: &App) -> Element<'_, Message> {
 }
 
 fn block_card(block: &EditorBlock, selected: bool) -> Element<'_, Message> {
-    let color = match block.slot % 5 {
-        0 => Color::from_rgb(0.25, 0.45, 0.58),
-        1 => Color::from_rgb(0.35, 0.3, 0.58),
-        2 => Color::from_rgb(0.6, 0.32, 0.25),
-        3 => Color::from_rgb(0.58, 0.42, 0.2),
-        _ => Color::from_rgb(0.25, 0.5, 0.35),
-    };
+    let color = block_color(&block.model_id);
     button(
         column![
-            container(text(block.model.clone()).size(10))
+            container(
+                text(block.model.clone())
+                    .size(10)
+                    .width(Length::Fill)
+                    .align_x(iced::alignment::Horizontal::Center)
+                    .wrapping(text::Wrapping::WordOrGlyph),
+            )
+            .width(Length::Fill)
+            .padding([5, 7])
+            .style(move |_theme: &Theme| container::Style {
+                background: Some(color.into()),
+                ..Default::default()
+            }),
+            text(block.name.clone())
+                .size(12)
                 .width(Length::Fill)
-                .padding([5, 7])
-                .style(move |_theme: &Theme| container::Style {
-                    background: Some(color.into()),
-                    ..Default::default()
-                }),
-            text(block.name.clone()).size(12),
+                .align_x(iced::alignment::Horizontal::Center)
+                .wrapping(text::Wrapping::WordOrGlyph),
             text(format!("Slot {}", block.slot)).size(10),
         ]
         .spacing(5)
         .align_x(Alignment::Center),
     )
-    .width(Length::Fixed(118.0))
+    .width(Length::Fixed(140.0))
     .padding(0)
     .on_press(Message::BlockSelected(block.slot))
     .style(move |_theme: &Theme, _status| button::Style {
@@ -307,7 +319,11 @@ fn block_card(block: &EditorBlock, selected: bool) -> Element<'_, Message> {
 
 fn parameter_inspector(app: &App) -> Element<'_, Message> {
     let Some(block) = app.editor.selected_block() else {
-        return panel(text("Select a block to edit"), 255.0).into();
+        return panel(
+            text("Select a block to edit"),
+            Color::from_rgb(0.32, 0.58, 0.72),
+        )
+        .into();
     };
 
     let mut controls = column![
@@ -319,13 +335,18 @@ fn parameter_inspector(app: &App) -> Element<'_, Message> {
     .spacing(10);
 
     for parameter in &block.parameters {
-        controls = controls.push(parameter_control(block.slot, parameter));
+        controls = controls.push(parameter_control(
+            block.slot,
+            parameter,
+            block_color(&block.model_id),
+        ));
     }
 
-    panel(scrollable(controls).height(Length::Fill), 255.0).into()
+    let color = block_color(&block.model_id);
+    panel(scrollable(controls).height(Length::Fill), color).into()
 }
 
-fn parameter_control(block: u8, parameter: &EditorParameter) -> Element<'_, Message> {
+fn parameter_control(block: u8, parameter: &EditorParameter, color: Color) -> Element<'_, Message> {
     let value = parameter.value;
     let label = row![
         text(parameter.name.clone()).size(12),
@@ -346,7 +367,13 @@ fn parameter_control(block: u8, parameter: &EditorParameter) -> Element<'_, Mess
     column![
         label,
         control,
-        progress_bar(parameter.min..=parameter.max, value)
+        progress_bar(parameter.min..=parameter.max, value).style(move |_theme| {
+            progress_bar::Style {
+                background: color.scale_alpha(0.25).into(),
+                bar: color.into(),
+                border: iced::Border::default(),
+            }
+        })
     ]
     .spacing(5)
     .into()
@@ -395,18 +422,43 @@ fn snapshot_bar(app: &App) -> Element<'_, Message> {
         .into()
 }
 
+fn block_color(model_id: &str) -> Color {
+    let id = model_id.to_ascii_lowercase();
+    if id.contains("amp") || id.contains("preamp") {
+        Color::from_rgb(0.72, 0.3, 0.18)
+    } else if id.contains("cab") || id.contains("ir") {
+        Color::from_rgb(0.42, 0.32, 0.65)
+    } else if id.contains("delay") {
+        Color::from_rgb(0.2, 0.48, 0.72)
+    } else if id.contains("reverb") {
+        Color::from_rgb(0.2, 0.62, 0.58)
+    } else if id.contains("mod") || id.contains("chorus") || id.contains("flanger") {
+        Color::from_rgb(0.28, 0.58, 0.35)
+    } else if id.contains("dist") || id.contains("fuzz") || id.contains("overdrive") {
+        Color::from_rgb(0.78, 0.48, 0.18)
+    } else if id.contains("comp") {
+        Color::from_rgb(0.7, 0.58, 0.2)
+    } else if id.contains("eq") || id.contains("filter") {
+        Color::from_rgb(0.58, 0.35, 0.68)
+    } else if id.contains("gate") {
+        Color::from_rgb(0.36, 0.42, 0.48)
+    } else {
+        Color::from_rgb(0.3, 0.48, 0.55)
+    }
+}
+
 fn panel<'a>(
     content: impl Into<Element<'a, Message>>,
-    width: f32,
+    accent: Color,
 ) -> iced::widget::Container<'a, Message> {
     container(content)
         .padding(10)
-        .width(Length::Fixed(width))
+        .width(Length::Fill)
         .height(Length::Fill)
-        .style(|_theme: &Theme| container::Style {
+        .style(move |_theme: &Theme| container::Style {
             background: Some(Color::from_rgb(0.1, 0.1, 0.11).into()),
             border: iced::Border {
-                color: Color::from_rgb(0.22, 0.22, 0.25),
+                color: accent.scale_alpha(0.7),
                 width: 1.0,
                 radius: 4.0.into(),
             },

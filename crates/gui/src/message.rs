@@ -23,6 +23,7 @@ pub enum Message {
     PresetRenameFinished(Result<(), String>),
     SavePreset,
     PresetSaveFinished(Result<(), String>),
+    PaneResized(iced::widget::pane_grid::ResizeEvent),
     BlockSelected(u8),
     ParameterChanged(u8, f32),
     ParameterEditReleased {
