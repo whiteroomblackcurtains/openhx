@@ -2,6 +2,7 @@
 pub enum AppState {
     Waiting,
     Connected,
+    Offline,
     Error,
 }
 
@@ -33,6 +34,31 @@ pub struct EditorState {
 }
 
 impl EditorState {
+    pub fn offline_demo() -> Self {
+        let mut editor = Self {
+            preset_name: "Offline preset".to_string(),
+            ..Self::default()
+        };
+        for (slot, model_id) in [
+            (0, "HD2_GateNoiseGate"),
+            (1, "HD2_AmpBrit2204"),
+            (2, "HD2_DelaySimpleDelay"),
+        ] {
+            if let Some(definition) = crate::catalog::model(model_id) {
+                let names: Vec<String> = definition
+                    .params
+                    .iter()
+                    .map(|parameter| parameter.symbolic_id.clone())
+                    .collect();
+                if let Ok(block) = editor_block_with_values(slot, model_id, &names, &[]) {
+                    editor.blocks.push(block);
+                }
+            }
+        }
+        editor.selected_block = editor.blocks.first().map_or(0, |block| block.slot);
+        editor
+    }
+
     pub fn load_preset(&mut self, name: impl Into<String>) {
         self.preset_name = name.into();
         self.selected_block = 0;

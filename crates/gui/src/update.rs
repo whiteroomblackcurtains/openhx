@@ -45,6 +45,24 @@ pub fn handle_message(app: &mut App, message: Message) -> Task<Message> {
             app.editor = crate::state::EditorState::default();
             Task::none()
         }
+        Message::EnterOfflineMode => {
+            app.state = AppState::Offline;
+            app.device_name = "Offline".to_string();
+            app.setlists.clear();
+            app.presets.clear();
+            app.selected_preset = None;
+            app.editor = crate::state::EditorState::offline_demo();
+            app.sync_block_panes();
+            app.error_log = None;
+            Task::none()
+        }
+        Message::ExitOfflineMode => {
+            app.state = AppState::Waiting;
+            app.device_name.clear();
+            app.editor = crate::state::EditorState::default();
+            app.block_panes = pane_grid::State::new(0).0;
+            Task::none()
+        }
         Message::SetlistChosen(setlist) => {
             if setlist == app.setlist {
                 return Task::none();
@@ -132,6 +150,9 @@ pub fn handle_message(app: &mut App, message: Message) -> Task<Message> {
             Task::none()
         }
         Message::RenamePreset => {
+            if app.state == AppState::Offline {
+                return Task::none();
+            }
             let Some(preset) = app.selected_preset else {
                 return Task::none();
             };
@@ -156,6 +177,10 @@ pub fn handle_message(app: &mut App, message: Message) -> Task<Message> {
             Task::none()
         }
         Message::SavePreset => {
+            if app.state == AppState::Offline {
+                app.error_log = None;
+                return Task::none();
+            }
             let Some(preset) = app.selected_preset else {
                 app.error_log = Some("Select a preset before saving".to_string());
                 return Task::none();
@@ -203,6 +228,22 @@ pub fn handle_message(app: &mut App, message: Message) -> Task<Message> {
                 };
                 if source_slot / 20 != destination_slot / 20 {
                     app.error_log = Some("Blocks can only be reordered within one DSP path".into());
+                    return Task::none();
+                }
+                if app.state == AppState::Offline {
+                    app.block_panes.swap(pane, target);
+                    if let (Some(source_index), Some(destination_index)) = (
+                        app.editor
+                            .blocks
+                            .iter()
+                            .position(|block| block.slot == source_slot),
+                        app.editor
+                            .blocks
+                            .iter()
+                            .position(|block| block.slot == destination_slot),
+                    ) {
+                        app.editor.blocks.swap(source_index, destination_index);
+                    }
                     return Task::none();
                 }
                 let occupied: std::collections::HashSet<u8> =
@@ -366,6 +407,9 @@ pub fn handle_message(app: &mut App, message: Message) -> Task<Message> {
             Task::none()
         }
         Message::ParameterEditReleased { block, parameter } => {
+            if app.state == AppState::Offline {
+                return Task::none();
+            }
             let value = app
                 .editor
                 .blocks

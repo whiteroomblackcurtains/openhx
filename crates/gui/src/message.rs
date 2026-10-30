@@ -9,6 +9,8 @@ pub enum Message {
         details: PresetDetails,
     },
     DeviceDisconnected,
+    EnterOfflineMode,
+    ExitOfflineMode,
     ConnectionError(String),
     /// The user picked another setlist in the sidebar.
     SetlistChosen(u8),

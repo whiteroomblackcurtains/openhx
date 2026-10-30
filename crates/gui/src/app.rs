@@ -67,6 +67,7 @@ impl App {
         match self.state {
             AppState::Waiting => Subscription::run(worker::usb_poll),
             AppState::Connected => Subscription::run(worker::usb_check_disconnect),
+            AppState::Offline => Subscription::none(),
             _ => Subscription::none(),
         }
     }

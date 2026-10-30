@@ -41,12 +41,17 @@ pub fn view(app: &App) -> Element<'_, Message> {
     let content = match app.state {
         AppState::Waiting => column![
             text(fl!("waiting-title")).size(30),
-            text(fl!("waiting-subtitle"))
+            text(fl!("waiting-subtitle")),
+            button(text("Open offline editor"))
+                .on_press(Message::EnterOfflineMode)
+                .padding([8, 14])
+                .style(button::secondary)
         ]
         .align_x(Alignment::Center)
         .spacing(15)
         .into(),
         AppState::Connected => editor_workspace(app),
+        AppState::Offline => editor_workspace(app),
         AppState::Error => {
             let error_msg = app
                 .error_log
@@ -94,10 +99,11 @@ fn editor_workspace(app: &App) -> Element<'_, Message> {
 
 fn top_bar(app: &App) -> Element<'_, Message> {
     let device = container(
-        text(fl!(
-            "connected-header",
-            device_name = app.device_name.clone()
-        ))
+        text(if app.state == AppState::Offline {
+            "Offline editor".to_string()
+        } else {
+            fl!("connected-header", device_name = app.device_name.clone())
+        })
         .size(12)
         .style(|_theme: &Theme| text::Style {
             color: Some(Color::from_rgb(0.45, 0.9, 0.55)),
@@ -129,6 +135,17 @@ fn top_bar(app: &App) -> Element<'_, Message> {
         .padding([7, 12])
         .style(button::primary);
 
+    let mode_button = if app.state == AppState::Offline {
+        button(text("Close offline editor"))
+            .on_press(Message::ExitOfflineMode)
+            .style(button::secondary)
+    } else {
+        button(text("Offline"))
+            .on_press(Message::EnterOfflineMode)
+            .style(button::secondary)
+    }
+    .padding([7, 12]);
+
     row![
         text("OpenHX").size(22),
         rule::vertical(24),
@@ -138,6 +155,7 @@ fn top_bar(app: &App) -> Element<'_, Message> {
         space::horizontal(),
         text("HX Edit workspace").size(13),
         device,
+        mode_button,
     ]
     .spacing(10)
     .align_y(Alignment::Center)
