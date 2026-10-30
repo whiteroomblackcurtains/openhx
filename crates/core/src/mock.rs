@@ -88,6 +88,12 @@ impl DeviceClient for MockClient {
         Ok(())
     }
 
+    fn save_preset(&self, setlist: u8, preset: u8, name: &str) -> Result<(), HxError> {
+        self.rename_preset(setlist, preset, name)?;
+        eprintln!("[mock] save_preset(setlist={setlist}, preset={preset}, name={name:?}) — OK");
+        Ok(())
+    }
+
     fn set_parameter(
         &self,
         block: u8,

@@ -121,12 +121,17 @@ fn top_bar(app: &App) -> Element<'_, Message> {
         .on_press(Message::RenamePreset)
         .padding([7, 12])
         .style(button::secondary);
+    let save = button(text("Save"))
+        .on_press(Message::SavePreset)
+        .padding([7, 12])
+        .style(button::primary);
 
     row![
         text("OpenHX").size(22),
         rule::vertical(24),
         preset_name,
         rename,
+        save,
         space::horizontal(),
         text("HX Edit workspace").size(13),
         device,

@@ -113,8 +113,9 @@ canvas, block parameter inspector, snapshot strip, and footswitch controls. Para
 controls are loaded from the bundled HX Edit model resources, so each supported block
 shows its own parameter names, ranges, and defaults. Parameter changes are sent to the
 active edit buffer when a control is released; preset renaming is persisted immediately.
+Use the **Save** button to write the edited active buffer to the selected preset slot.
 Preset block discovery and current parameter values are read from the device edit buffer.
-Routing, snapshots, and save-to-device are still being expanded.
+Routing, snapshots, and the remaining editor workflows are still being expanded.
 
 ---
 

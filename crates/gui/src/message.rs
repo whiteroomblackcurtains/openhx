@@ -21,6 +21,8 @@ pub enum Message {
     PresetNameChanged(String),
     RenamePreset,
     PresetRenameFinished(Result<(), String>),
+    SavePreset,
+    PresetSaveFinished(Result<(), String>),
     BlockSelected(u8),
     ParameterChanged(u8, f32),
     ParameterEditReleased {

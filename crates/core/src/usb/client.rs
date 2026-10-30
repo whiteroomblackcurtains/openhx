@@ -639,6 +639,34 @@ impl DeviceClient for Client {
         )
     }
 
+    fn save_preset(&self, setlist: u8, preset: u8, name: &str) -> Result<(), HxError> {
+        self.profile.validate_setlist(setlist)?;
+        if u16::from(preset) >= self.profile.preset_count {
+            return Err(HxError::protocol(format!(
+                "preset {preset} out of range (0–{})",
+                self.profile.preset_count - 1
+            )));
+        }
+        if name.is_empty() || name.contains('\0') {
+            return Err(HxError::protocol(
+                "preset name must be non-empty and contain no NUL",
+            ));
+        }
+        self.run_edit_session(
+            1,
+            71,
+            rmpv::Value::Map(vec![
+                (rmpv::Value::from(107i64), rmpv::Value::from(setlist)),
+                (rmpv::Value::from(108i64), rmpv::Value::from(preset)),
+                (
+                    rmpv::Value::from(109i64),
+                    rmpv::Value::from(format!("{name}\0")),
+                ),
+            ]),
+            Duration::from_millis(TIMEOUT_MS),
+        )
+    }
+
     fn set_parameter(
         &self,
         block: u8,

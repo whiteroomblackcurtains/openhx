@@ -46,6 +46,9 @@ pub trait DeviceClient: Send {
     /// Renames a stored preset without changing its signal-chain contents.
     fn rename_preset(&self, setlist: u8, preset: u8, name: &str) -> Result<(), HxError>;
 
+    /// Saves the active edit buffer into a preset slot.
+    fn save_preset(&self, setlist: u8, preset: u8, name: &str) -> Result<(), HxError>;
+
     /// Sets a floating-point parameter in a block of the active preset.
     ///
     /// `block` and `parameter` are zero-based device indices. `model` is `0`

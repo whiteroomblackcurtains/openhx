@@ -152,6 +152,33 @@ pub fn handle_message(app: &mut App, message: Message) -> Task<Message> {
             }
             Task::none()
         }
+        Message::SavePreset => {
+            let Some(preset) = app.selected_preset else {
+                app.error_log = Some("Select a preset before saving".to_string());
+                return Task::none();
+            };
+            let setlist = app.setlist;
+            let name = app.editor.preset_name.clone();
+            Task::perform(
+                async move {
+                    tokio::task::spawn_blocking(move || {
+                        with_device(|client| client.save_preset(setlist, preset, &name))
+                    })
+                    .await
+                    .unwrap_or_else(|e| Err(HxError::Protocol(e.to_string())))
+                },
+                |result| Message::PresetSaveFinished(result.map_err(|e| e.to_string())),
+            )
+        }
+        Message::PresetSaveFinished(result) => {
+            if let Err(error) = result {
+                error!("Preset save failed: {error}");
+                app.error_log = Some(error);
+            } else {
+                app.error_log = None;
+            }
+            Task::none()
+        }
         Message::BlockSelected(block) => {
             app.editor.selected_block = block;
             Task::none()
