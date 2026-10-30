@@ -24,6 +24,13 @@ pub enum Message {
     SavePreset,
     PresetSaveFinished(Result<(), String>),
     PaneResized(iced::widget::pane_grid::ResizeEvent),
+    BlockDragged(iced::widget::pane_grid::DragEvent),
+    BlockMoveFinished {
+        source: u8,
+        destination: u8,
+        temporary: u8,
+        result: Result<(), String>,
+    },
     BlockSelected(u8),
     ParameterChanged(u8, f32),
     ParameterEditReleased {

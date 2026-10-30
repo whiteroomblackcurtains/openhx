@@ -7,7 +7,7 @@ use iced::widget::{
     button, column, container, pane_grid, pick_list, progress_bar, row, rule, scrollable, slider,
     space, text, text_input,
 };
-use iced::{Alignment, Color, Element, Length, Padding, Theme};
+use iced::{Alignment, Color, Element, Length, Theme};
 use openhx_core::Setlist;
 use openhx_i18n::fl;
 
@@ -214,14 +214,6 @@ fn preset_browser(app: &App) -> Element<'_, Message> {
 }
 
 fn signal_chain(app: &App) -> Element<'_, Message> {
-    let mut chain = row![].spacing(8).align_y(Alignment::Center);
-    for block in &app.editor.blocks {
-        if block.slot > 0 {
-            chain = chain.push(text("→").size(18));
-        }
-        chain = chain.push(block_card(block, app.editor.selected_block == block.slot));
-    }
-
     let canvas = container(
         column![
             row![
@@ -230,22 +222,23 @@ fn signal_chain(app: &App) -> Element<'_, Message> {
                 text("Preset edit buffer").size(11)
             ],
             rule::horizontal(1),
-            scrollable(row![chain].padding(Padding {
-                top: 70.0,
-                right: 24.0,
-                bottom: 70.0,
-                left: 24.0,
-            }))
-            .direction(scrollable::Direction::Horizontal(
-                scrollable::Scrollbar::default(),
-            ))
+            pane_grid(&app.block_panes, |_pane, slot, _maximized| {
+                let block = app.editor.blocks.iter().find(|block| block.slot == *slot);
+                pane_grid::Content::new(match block {
+                    Some(block) => block_card(block, app.editor.selected_block == block.slot),
+                    None => text("No block").into(),
+                })
+            })
+            .on_drag(Message::BlockDragged)
+            .spacing(8)
+            .min_size(140)
             .height(Length::Fill),
             row![
                 button(text("+ Block").size(12))
                     .padding([6, 10])
                     .style(button::secondary),
                 space::horizontal(),
-                text("Drag-and-drop routing is coming next").size(11),
+                text("Drag blocks to reorder the signal chain").size(11),
             ]
         ]
         .spacing(10),

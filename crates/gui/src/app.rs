@@ -20,6 +20,7 @@ pub struct App {
     pub selected_preset: Option<u8>,
     pub editor: crate::state::EditorState,
     pub panes: pane_grid::State<EditorPane>,
+    pub block_panes: pane_grid::State<u8>,
 }
 
 impl Default for App {
@@ -39,6 +40,7 @@ impl Default for App {
                 a: Box::new(pane_grid::Configuration::Pane(EditorPane::Workspace)),
                 b: Box::new(pane_grid::Configuration::Pane(EditorPane::Inspector)),
             }),
+            block_panes: pane_grid::State::new(0).0,
         }
     }
 }
@@ -62,5 +64,22 @@ impl App {
 
     pub fn view(&self) -> iced::Element<'_, Message> {
         view::view(self)
+    }
+
+    pub fn sync_block_panes(&mut self) {
+        let Some(first) = self.editor.blocks.first() else {
+            self.block_panes = pane_grid::State::new(0).0;
+            return;
+        };
+        let mut configuration = pane_grid::Configuration::Pane(first.slot);
+        for block in self.editor.blocks.iter().skip(1) {
+            configuration = pane_grid::Configuration::Split {
+                axis: pane_grid::Axis::Vertical,
+                ratio: 0.5,
+                a: Box::new(configuration),
+                b: Box::new(pane_grid::Configuration::Pane(block.slot)),
+            };
+        }
+        self.block_panes = pane_grid::State::with_configuration(configuration);
     }
 }

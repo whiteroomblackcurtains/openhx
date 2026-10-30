@@ -49,6 +49,9 @@ pub trait DeviceClient: Send {
     /// Saves the active edit buffer into a preset slot.
     fn save_preset(&self, setlist: u8, preset: u8, name: &str) -> Result<(), HxError>;
 
+    /// Moves a block between slots using an empty temporary slot.
+    fn move_block(&self, source: u8, destination: u8, temporary: u8) -> Result<(), HxError>;
+
     /// Sets a floating-point parameter in a block of the active preset.
     ///
     /// `block` and `parameter` are zero-based device indices. `model` is `0`

@@ -1,5 +1,5 @@
 use crate::{app::App, message::Message, state::AppState};
-use iced::Task;
+use iced::{Task, widget::pane_grid};
 use openhx_core::{HxError, reset_shared_device, with_device};
 use tracing::{debug, error, info};
 
@@ -28,6 +28,8 @@ pub fn handle_message(app: &mut App, message: Message) -> Task<Message> {
             if let Err(error) = app.editor.load_details("Current preset", &details) {
                 error!("Current preset model decode failed: {error}");
                 app.error_log = Some(error);
+            } else {
+                app.sync_block_panes();
             }
             Task::none()
         }
@@ -115,6 +117,7 @@ pub fn handle_message(app: &mut App, message: Message) -> Task<Message> {
                         app.error_log = Some(error);
                     } else {
                         app.error_log = None;
+                        app.sync_block_panes();
                     }
                 }
                 Err(error) => {
@@ -181,6 +184,105 @@ pub fn handle_message(app: &mut App, message: Message) -> Task<Message> {
         }
         Message::PaneResized(event) => {
             app.panes.resize(event.split, event.ratio);
+            Task::none()
+        }
+        Message::BlockDragged(event) => match event {
+            iced::widget::pane_grid::DragEvent::Dropped {
+                pane,
+                target:
+                    iced::widget::pane_grid::Target::Pane(
+                        target,
+                        iced::widget::pane_grid::Region::Center,
+                    ),
+            } => {
+                let Some(&source_slot) = app.block_panes.get(pane) else {
+                    return Task::none();
+                };
+                let Some(&destination_slot) = app.block_panes.get(target) else {
+                    return Task::none();
+                };
+                if source_slot / 20 != destination_slot / 20 {
+                    app.error_log = Some("Blocks can only be reordered within one DSP path".into());
+                    return Task::none();
+                }
+                let occupied: std::collections::HashSet<u8> =
+                    app.editor.blocks.iter().map(|block| block.slot).collect();
+                let path_start = (source_slot / 20) * 20;
+                let Some(temporary) =
+                    (path_start..path_start + 20).find(|slot| !occupied.contains(slot))
+                else {
+                    app.error_log = Some("No empty slot is available for this move".into());
+                    return Task::none();
+                };
+                app.block_panes.swap(pane, target);
+                let source_index = app
+                    .editor
+                    .blocks
+                    .iter()
+                    .position(|block| block.slot == source_slot);
+                let destination_index = app
+                    .editor
+                    .blocks
+                    .iter()
+                    .position(|block| block.slot == destination_slot);
+                if let (Some(source_index), Some(destination_index)) =
+                    (source_index, destination_index)
+                {
+                    app.editor.blocks.swap(source_index, destination_index);
+                }
+                Task::perform(
+                    async move {
+                        tokio::task::spawn_blocking(move || {
+                            with_device(|client| {
+                                client.move_block(source_slot, destination_slot, temporary)
+                            })
+                        })
+                        .await
+                        .unwrap_or_else(|e| Err(HxError::Protocol(e.to_string())))
+                    },
+                    move |result| Message::BlockMoveFinished {
+                        source: source_slot,
+                        destination: destination_slot,
+                        temporary,
+                        result: result.map_err(|error| error.to_string()),
+                    },
+                )
+            }
+            _ => Task::none(),
+        },
+        Message::BlockMoveFinished {
+            source,
+            destination,
+            temporary: _,
+            result,
+        } => {
+            if let Err(error) = result {
+                if let (Some(source_index), Some(destination_index)) = (
+                    app.editor
+                        .blocks
+                        .iter()
+                        .position(|block| block.slot == source),
+                    app.editor
+                        .blocks
+                        .iter()
+                        .position(|block| block.slot == destination),
+                ) {
+                    app.editor.blocks.swap(source_index, destination_index);
+                }
+                app.block_panes = pane_grid::State::new(0).0;
+                app.sync_block_panes();
+                error!("Block move failed: {error}");
+                app.error_log = Some(error);
+            } else {
+                app.editor.blocks.iter_mut().for_each(|block| {
+                    if block.slot == source {
+                        block.slot = destination;
+                    } else if block.slot == destination {
+                        block.slot = source;
+                    }
+                });
+                app.error_log = None;
+            }
             Task::none()
         }
         Message::BlockSelected(block) => {

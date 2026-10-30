@@ -667,6 +667,49 @@ impl DeviceClient for Client {
         )
     }
 
+    fn move_block(&self, source: u8, destination: u8, temporary: u8) -> Result<(), HxError> {
+        if source >= 40 || destination >= 40 || temporary >= 40 {
+            return Err(HxError::protocol("block slot must be below 40"));
+        }
+        if source / 20 != destination / 20 || source / 20 != temporary / 20 {
+            return Err(HxError::protocol(
+                "block moves must stay within the same DSP path",
+            ));
+        }
+        if source == destination || source == temporary || destination == temporary {
+            return Err(HxError::protocol("block move slots must be distinct"));
+        }
+
+        for (source_slot, destination_slot) in [
+            (source, temporary),
+            (destination, source),
+            (temporary, destination),
+        ] {
+            self.run_edit_session(
+                1,
+                78,
+                rmpv::Value::Map(vec![
+                    (rmpv::Value::from(98i64), rmpv::Value::from(source_slot)),
+                    (rmpv::Value::from(26i64), rmpv::Value::from(0i64)),
+                ]),
+                Duration::from_millis(TIMEOUT_MS),
+            )?;
+            self.run_edit_session(
+                1,
+                43,
+                rmpv::Value::Map(vec![
+                    (rmpv::Value::from(75i64), rmpv::Value::from(source_slot)),
+                    (
+                        rmpv::Value::from(76i64),
+                        rmpv::Value::from(destination_slot),
+                    ),
+                ]),
+                Duration::from_millis(TIMEOUT_MS),
+            )?;
+        }
+        Ok(())
+    }
+
     fn set_parameter(
         &self,
         block: u8,

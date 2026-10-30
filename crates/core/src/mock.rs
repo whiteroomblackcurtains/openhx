@@ -94,6 +94,13 @@ impl DeviceClient for MockClient {
         Ok(())
     }
 
+    fn move_block(&self, source: u8, destination: u8, temporary: u8) -> Result<(), HxError> {
+        eprintln!(
+            "[mock] move_block(source={source}, destination={destination}, temporary={temporary}) — OK"
+        );
+        Ok(())
+    }
+
     fn set_parameter(
         &self,
         block: u8,
