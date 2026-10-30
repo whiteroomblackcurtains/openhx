@@ -1,5 +1,5 @@
 use super::{
-    parser::{parse_msgpack_stream, parse_setlists, response_payload},
+    parser::{parse_msgpack_stream, parse_preset_document, parse_setlists, response_payload},
     protocol::*,
 };
 use crate::{
@@ -110,9 +110,17 @@ impl Client {
 
         // Ask libusb to detach any kernel driver bound to the interface so we
         // can claim it exclusively.
-        handle.set_auto_detach_kernel_driver(true).map_err(|e| {
-            HxError::protocol(fl!("usb-kernel-detach-failed", error = e.to_string()))
-        })?;
+        // Platforms without kernel driver detach (e.g. Windows) report
+        // `NotSupported`; there is nothing to detach there, so carry on.
+        match handle.set_auto_detach_kernel_driver(true) {
+            Ok(()) | Err(rusb::Error::NotSupported) => {}
+            Err(e) => {
+                return Err(HxError::protocol(fl!(
+                    "usb-kernel-detach-failed",
+                    error = e.to_string()
+                )));
+            }
+        }
 
         // Ensure configuration 1 — the only configuration that exposes the
         // vendor-specific bulk endpoints.
@@ -262,6 +270,137 @@ impl Client {
         self.drain_stale_data();
 
         Ok(())
+    }
+
+    fn run_edit_session(
+        &self,
+        transaction: u16,
+        operation: i64,
+        target: rmpv::Value,
+        timeout: Duration,
+    ) -> Result<(), HxError> {
+        let mut buf = vec![0u8; 512];
+
+        for packet in edit_channel_handshake() {
+            let seq = packet[SEQ_BYTE_OFFSET];
+            self.handle.write_bulk(EP_OUT, &packet, timeout)?;
+            let n = self.read_for_seq(seq, &mut buf, timeout)?;
+            tracing::debug!(
+                stage = "edit-handshake",
+                seq,
+                len = n,
+                hex = format!("{:02X?}", &buf[..n.min(32)]),
+                "edit read response"
+            );
+        }
+
+        let request = build_edit_request(0x04, 0x0000_1009, transaction, operation, target);
+        self.handle.write_bulk(EP_OUT, &request, timeout)?;
+        let n = self.read_for_seq(0x04, &mut buf, timeout)?;
+        parse_edit_response(&buf[..n])?;
+        self.drain_stale_data();
+        Ok(())
+    }
+
+    fn read_current_preset_impl(&self) -> Result<crate::models::PresetDetails, HxError> {
+        let timeout = Duration::from_millis(TIMEOUT_MS);
+        let mut buf = vec![0u8; 8 * 1024];
+        self.drain_stale_data();
+
+        for packet in edit_channel_handshake() {
+            let seq = packet[SEQ_BYTE_OFFSET];
+            self.handle.write_bulk(EP_OUT, &packet, timeout)?;
+            self.read_for_seq(seq, &mut buf, timeout)?;
+        }
+
+        let request = |sequence: u8, transaction: u16, operation: i64, target: rmpv::Value| {
+            build_edit_request(sequence, 0x0000_1009, transaction, operation, target)
+        };
+        for (sequence, (transaction, operation, target)) in [
+            (1, 76, rmpv::Value::Map(Vec::new())),
+            (
+                2,
+                24,
+                rmpv::Value::Map(vec![(rmpv::Value::from(118i64), rmpv::Value::from(128i64))]),
+            ),
+            (3, 23, rmpv::Value::Nil),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let sequence = 0x04u8 + sequence as u8;
+            let packet = request(sequence, transaction, operation, target);
+            self.handle.write_bulk(EP_OUT, &packet, timeout)?;
+            let n = self.read_for_seq(sequence, &mut buf, timeout)?;
+            tracing::debug!(
+                stage = operation,
+                seq = sequence,
+                len = n,
+                hex = format!("{:02X?}", &buf[..n.min(32)]),
+                "edit read response"
+            );
+            parse_edit_response(&buf[..n])?;
+        }
+
+        let packet = request(0x07, 4, 22, rmpv::Value::Nil);
+        self.handle.write_bulk(EP_OUT, &packet, timeout)?;
+        let n = self.read_for_seq(0x07, &mut buf, timeout)?;
+        tracing::debug!(
+            stage = 22,
+            seq = 0x07,
+            len = n,
+            hex = format!("{:02X?}", &buf[..n.min(32)]),
+            "edit read response"
+        );
+        let declared_payload_len =
+            u32::from_le_bytes(buf[20..24].try_into().expect("stream length header")) as usize;
+        let expected_stream_len = declared_payload_len
+            .checked_add(RESPONSE_PAYLOAD_OFFSET - RESPONSE_HEADER_SIZE)
+            .ok_or_else(|| HxError::protocol("preset stream length overflow"))?;
+        let mut stream = buf[RESPONSE_HEADER_SIZE..n].to_vec();
+        let mut seq = 8u8;
+        let mut offset = 0x0000_1009u32;
+        let mut empty_chunks = 0u8;
+
+        while stream.len() < expected_stream_len && stream.len() < 64 * 1024 {
+            if parse_preset_document(&stream).is_ok() {
+                break;
+            }
+            let packet = build_edit_chunk_request(seq, offset);
+            self.handle.write_bulk(EP_OUT, &packet, timeout)?;
+            let n = self.read_for_seq(seq, &mut buf, timeout)?;
+            tracing::debug!(
+                stage = "edit-chunk",
+                seq,
+                len = n,
+                hex = format!("{:02X?}", &buf[..n.min(32)]),
+                "edit stream response"
+            );
+            if n <= RESPONSE_HEADER_SIZE {
+                empty_chunks = empty_chunks.saturating_add(1);
+                if empty_chunks >= 8 {
+                    return Err(HxError::protocol(
+                        "preset stream returned too many empty credit frames",
+                    ));
+                }
+                seq = seq.wrapping_add(1);
+                continue;
+            }
+            let chunk = &buf[RESPONSE_HEADER_SIZE..n];
+            empty_chunks = 0;
+            stream.extend_from_slice(chunk);
+            if stream.len() > expected_stream_len {
+                stream.truncate(expected_stream_len);
+            }
+            seq = seq.wrapping_add(1);
+            offset = offset
+                .checked_add(0x100)
+                .ok_or_else(|| HxError::protocol("preset stream offset overflow"))?;
+        }
+
+        let details = parse_preset_document(&stream)?;
+        self.drain_stale_data();
+        Ok(details)
     }
 
     /// Executes a single, complete preset extraction session for `setlist`.
@@ -467,6 +606,97 @@ impl DeviceClient for Client {
         self.profile.validate_setlist(setlist)?;
         self.select_preset_impl(setlist, preset)
     }
+
+    fn read_current_preset(&self) -> Result<crate::models::PresetDetails, HxError> {
+        self.read_current_preset_impl()
+    }
+
+    fn rename_preset(&self, setlist: u8, preset: u8, name: &str) -> Result<(), HxError> {
+        self.profile.validate_setlist(setlist)?;
+        if u16::from(preset) >= self.profile.preset_count {
+            return Err(HxError::protocol(format!(
+                "preset {preset} out of range (0–{})",
+                self.profile.preset_count - 1
+            )));
+        }
+        if name.is_empty() || name.contains('\0') {
+            return Err(HxError::protocol(
+                "preset name must be non-empty and contain no NUL",
+            ));
+        }
+        self.run_edit_session(
+            1,
+            6,
+            rmpv::Value::Map(vec![
+                (rmpv::Value::from(107i64), rmpv::Value::from(setlist)),
+                (rmpv::Value::from(108i64), rmpv::Value::from(preset)),
+                (
+                    rmpv::Value::from(109i64),
+                    rmpv::Value::from(format!("{name}\0")),
+                ),
+            ]),
+            Duration::from_millis(TIMEOUT_MS),
+        )
+    }
+
+    fn set_parameter(
+        &self,
+        block: u8,
+        parameter: u8,
+        value: f32,
+        model: u8,
+    ) -> Result<(), HxError> {
+        if model > 1 {
+            return Err(HxError::protocol("model must be 0 (main) or 1 (paired)"));
+        }
+        if !value.is_finite() {
+            return Err(HxError::protocol("parameter value must be finite"));
+        }
+        self.run_edit_session(
+            1,
+            30,
+            rmpv::Value::Map(vec![
+                (rmpv::Value::from(98i64), rmpv::Value::from(block)),
+                (rmpv::Value::from(29i64), rmpv::Value::Boolean(true)),
+                (rmpv::Value::from(26i64), rmpv::Value::from(model)),
+                (rmpv::Value::from(28i64), rmpv::Value::from(parameter)),
+                (rmpv::Value::from(119i64), rmpv::Value::F32(value)),
+            ]),
+            Duration::from_millis(TIMEOUT_MS),
+        )
+    }
+}
+
+fn parse_edit_response(response: &[u8]) -> Result<(), HxError> {
+    if response.len() < 24 {
+        return Err(HxError::protocol("edit response is too short"));
+    }
+
+    let body = &response[16..];
+    if body.len() < 8 {
+        return Err(HxError::protocol("edit response has no TLV body"));
+    }
+    let len = u32::from_le_bytes(body[4..8].try_into().unwrap()) as usize;
+    let end = 8usize
+        .checked_add(len)
+        .filter(|end| *end <= body.len())
+        .ok_or_else(|| HxError::protocol("edit response TLV is truncated"))?;
+    let mut cursor = std::io::Cursor::new(&body[8..end]);
+    let value = rmpv::decode::read_value(&mut cursor)?;
+    let status = value
+        .as_map()
+        .and_then(|map| {
+            map.iter()
+                .find(|(key, _)| key.as_i64() == Some(103))
+                .and_then(|(_, value)| value.as_i64())
+        })
+        .unwrap_or(0);
+    if status != 0 && status != 1 {
+        return Err(HxError::protocol(format!(
+            "device rejected edit with status {status}"
+        )));
+    }
+    Ok(())
 }
 
 impl Drop for Client {

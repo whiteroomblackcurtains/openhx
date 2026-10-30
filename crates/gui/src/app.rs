@@ -12,6 +12,7 @@ pub struct App {
     pub presets: Vec<Preset>,
     pub error_log: Option<String>,
     pub selected_preset: Option<u8>,
+    pub editor: crate::state::EditorState,
 }
 
 impl Default for App {
@@ -24,6 +25,7 @@ impl Default for App {
             presets: Vec::new(),
             error_log: None,
             selected_preset: None,
+            editor: crate::state::EditorState::default(),
         }
     }
 }

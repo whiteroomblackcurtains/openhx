@@ -2,7 +2,7 @@ use crate::{
     client::DeviceClient,
     device::{PROFILE_HX_STOMP_XL, profile::DeviceProfile},
     error::HxError,
-    models::{Preset, Setlist},
+    models::{Preset, PresetDetails, Setlist},
 };
 
 /// A simulated HX Stomp XL.
@@ -67,6 +67,43 @@ impl DeviceClient for MockClient {
 
         eprintln!("[mock] select_preset(setlist={setlist}, preset={preset}) — OK");
 
+        Ok(())
+    }
+
+    fn read_current_preset(&self) -> Result<PresetDetails, HxError> {
+        Ok(PresetDetails { blocks: Vec::new() })
+    }
+
+    fn rename_preset(&self, setlist: u8, preset: u8, name: &str) -> Result<(), HxError> {
+        self.profile().validate_setlist(setlist)?;
+        if u16::from(preset) >= self.profile().preset_count {
+            return Err(HxError::protocol(format!("preset {preset} out of range")));
+        }
+        if name.is_empty() || name.contains('\0') {
+            return Err(HxError::protocol(
+                "preset name must be non-empty and contain no NUL",
+            ));
+        }
+        eprintln!("[mock] rename_preset(setlist={setlist}, preset={preset}, name={name:?}) — OK");
+        Ok(())
+    }
+
+    fn set_parameter(
+        &self,
+        block: u8,
+        parameter: u8,
+        value: f32,
+        model: u8,
+    ) -> Result<(), HxError> {
+        if model > 1 {
+            return Err(HxError::protocol("model must be 0 (main) or 1 (paired)"));
+        }
+        if !value.is_finite() {
+            return Err(HxError::protocol("parameter value must be finite"));
+        }
+        eprintln!(
+            "[mock] set_parameter(block={block}, parameter={parameter}, value={value}, model={model}) — OK"
+        );
         Ok(())
     }
 }

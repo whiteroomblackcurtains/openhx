@@ -31,13 +31,14 @@ OpenHX was built to close that gap.
 - ✅ List setlists (with the names stored on the device)
 - ✅ List presets (per setlist on Helix-family devices)
 - ✅ Select preset (by setlist and slot)
-- 🚧 Rename preset
+- ✅ Rename preset
+- ✅ Change floating-point block parameters (CLI)
 - 🚧 Import and export presets (`.hlx` files)
 - 🚧 Reorder blocks
 - 🚧 Toggle individual effect blocks
 - 🚧 Manage Impulse Responses (IRs)
 - 🚧 Configure Global EQ
-- 🚧 Full GUI with preset browser and editor
+- ✅ HX Edit-inspired GUI with model-specific block parameters
 - 🚧 Support for multiple HX devices
 
 ---
@@ -92,6 +93,13 @@ openhx-cli preset list --setlist 2
 
 # Select a preset by setlist and slot (slot 0–127 within the setlist)
 openhx-cli preset select --setlist <SETLIST> --preset <PRESET>
+
+# Rename a stored preset without changing its signal chain
+openhx-cli preset rename --setlist <SETLIST> --preset <PRESET> --name "<NAME>"
+
+# Change a floating-point parameter in the active preset
+# block and parameter use the zero-based device indices
+openhx-cli preset set-parameter --block <BLOCK> --parameter <PARAMETER> --value <VALUE>
 ```
 
 ### GUI
@@ -99,6 +107,14 @@ openhx-cli preset select --setlist <SETLIST> --preset <PRESET>
 ```bash
 openhx
 ```
+
+The GUI includes an HX Edit-inspired workspace with a preset browser, signal-chain
+canvas, block parameter inspector, snapshot strip, and footswitch controls. Parameter
+controls are loaded from the bundled HX Edit model resources, so each supported block
+shows its own parameter names, ranges, and defaults. Parameter changes are sent to the
+active edit buffer when a control is released; preset renaming is persisted immediately.
+Preset block discovery and current parameter values are read from the device edit buffer.
+Routing, snapshots, and save-to-device are still being expanded.
 
 ---
 

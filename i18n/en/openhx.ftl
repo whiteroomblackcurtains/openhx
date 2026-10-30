@@ -23,6 +23,14 @@ cli-select-preset-about = Selects a specific preset on the device
 cli-select-preset-long = Switches the active preset on the connected Line 6 device by providing the setlist and preset indices.
 cli-selecting-preset = Selecting setlist { $setlist }, preset { $preset }...
 cli-preset-selected-success = Preset successfully selected!
+cli-rename-preset-about = Renames a stored preset without changing its signal chain.
+cli-rename-preset-long = Changes only the saved preset name. It does not save pending parameter edits.
+cli-set-parameter-about = Changes a floating-point parameter in the active preset.
+cli-set-parameter-long = Uses the device block and parameter indices reported by the HX protocol.
+cli-renaming-preset = Renaming setlist { $setlist } preset { $preset } to "{ $name }"...
+cli-preset-renamed-success = Preset renamed successfully!
+cli-setting-parameter = Setting block { $block } parameter { $parameter } to { $value }...
+cli-parameter-set-success = Parameter changed successfully!
 
 mock-mode-active = [mock] Running in mock mode — no hardware required.
 

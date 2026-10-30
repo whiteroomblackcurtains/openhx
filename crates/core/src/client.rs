@@ -1,7 +1,7 @@
 use crate::{
     device::profile::DeviceProfile,
     error::HxError,
-    models::{Preset, Setlist},
+    models::{Preset, PresetDetails, Setlist},
 };
 use std::sync::{Mutex, OnceLock};
 
@@ -39,6 +39,19 @@ pub trait DeviceClient: Send {
 
     /// Makes `preset` (a slot within `setlist`) the device's active preset.
     fn select_preset(&self, setlist: u8, preset: u8) -> Result<(), HxError>;
+
+    /// Reads the complete edit buffer for the currently selected preset.
+    fn read_current_preset(&self) -> Result<PresetDetails, HxError>;
+
+    /// Renames a stored preset without changing its signal-chain contents.
+    fn rename_preset(&self, setlist: u8, preset: u8, name: &str) -> Result<(), HxError>;
+
+    /// Sets a floating-point parameter in a block of the active preset.
+    ///
+    /// `block` and `parameter` are zero-based device indices. `model` is `0`
+    /// for the block's main model and `1` for its paired cab/IR model.
+    fn set_parameter(&self, block: u8, parameter: u8, value: f32, model: u8)
+    -> Result<(), HxError>;
 }
 
 /// Creates a [`DeviceClient`] for the given device, or auto-detects one.

@@ -45,3 +45,17 @@ impl std::fmt::Display for Preset {
         write!(f, "{:>3}: {}", self.index, self.name)
     }
 }
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct PresetDetails {
+    pub blocks: Vec<PresetBlock>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct PresetBlock {
+    pub slot: u8,
+    pub model_index: Option<u16>,
+    pub paired_model_index: Option<u16>,
+    pub parameters: Vec<f32>,
+    pub paired_parameters: Vec<f32>,
+}

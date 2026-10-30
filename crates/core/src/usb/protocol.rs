@@ -9,6 +9,14 @@ pub const OFFSET_STEP: u32 = 0x0100;
 pub const STREAM_INITIAL_OFFSET: u32 = 0x0000_1138;
 pub const PAGINATION_INITIAL_SEQ: u8 = 0x08;
 
+pub const EDIT_CHANNEL: (u16, u16) = (0x1080, 0x03ED);
+
+const MAGIC: u8 = 0x18;
+const HANDSHAKE_MAGIC: u8 = 0x28;
+const CMD_HANDSHAKE: u8 = 0x02;
+const CMD_OPEN: u8 = 0x04;
+const CMD_CHUNK: u8 = 0x08;
+
 /// A response shorter than this value signals end-of-stream.
 pub const MAX_CHUNK_SIZE: usize = 272;
 
@@ -120,6 +128,99 @@ pub fn build_pagination_request(seq: u8, offset: u32) -> [u8; 16] {
     let [o0, o1, o2, o3] = offset.to_le_bytes();
     [
         0x08, 0x00, 0x00, 0x18, 0x01, 0x10, 0xEF, 0x03, 0x00, seq, 0x00, 0x08, o0, o1, o2, o3,
+    ]
+}
+
+/// Builds an HX Edit channel handshake packet.
+#[inline]
+pub fn build_edit_handshake(
+    src: (u16, u16),
+    seq: u8,
+    cmd: u8,
+    arg: u32,
+    magic: u8,
+    body: &[u8],
+) -> Vec<u8> {
+    build_frame(src, seq, cmd, arg, magic, body)
+}
+
+/// Wraps an edit operation in the MessagePack-over-TLV body used by HX Edit.
+#[inline]
+pub fn build_edit_request(
+    seq: u8,
+    arg: u32,
+    transaction: u16,
+    operation: i64,
+    target: rmpv::Value,
+) -> Vec<u8> {
+    let envelope = rmpv::Value::Map(vec![
+        (rmpv::Value::from(102i64), rmpv::Value::from(transaction)),
+        (rmpv::Value::from(100i64), rmpv::Value::from(operation)),
+        (rmpv::Value::from(101i64), target),
+    ]);
+    let mut payload = Vec::new();
+    rmpv::encode::write_value(&mut payload, &envelope)
+        .expect("writing a MessagePack value to memory cannot fail");
+
+    let mut tlv = Vec::with_capacity(8 + payload.len());
+    tlv.extend_from_slice(&1u16.to_le_bytes());
+    tlv.extend_from_slice(&2u16.to_le_bytes());
+    tlv.extend_from_slice(&(payload.len() as u32).to_le_bytes());
+    tlv.extend_from_slice(&payload);
+    build_frame(EDIT_CHANNEL, seq, CMD_OPEN, arg, MAGIC, &tlv)
+}
+
+pub fn build_edit_chunk_request(seq: u8, arg: u32) -> Vec<u8> {
+    build_frame(EDIT_CHANNEL, seq, CMD_CHUNK, arg, MAGIC, &[])
+}
+
+fn build_frame(
+    (src, dst): (u16, u16),
+    seq: u8,
+    cmd: u8,
+    arg: u32,
+    magic: u8,
+    body: &[u8],
+) -> Vec<u8> {
+    let significant_len = 8usize
+        .checked_add(body.len())
+        .expect("USB frame length overflow");
+    let frame_len = 16usize
+        .checked_add(body.len())
+        .expect("USB frame length overflow");
+    let padded_len = (frame_len + 3) & !3;
+    let mut frame = vec![0u8; padded_len];
+    frame[..2].copy_from_slice(&(significant_len as u16).to_le_bytes());
+    frame[3] = magic;
+    frame[4..6].copy_from_slice(&src.to_le_bytes());
+    frame[6..8].copy_from_slice(&dst.to_le_bytes());
+    frame[9] = seq;
+    frame[11] = cmd;
+    frame[12..16].copy_from_slice(&arg.to_le_bytes());
+    frame[16..16 + body.len()].copy_from_slice(body);
+    frame
+}
+
+#[inline]
+pub fn edit_channel_handshake() -> [Vec<u8>; 3] {
+    [
+        build_edit_handshake(
+            EDIT_CHANNEL,
+            0,
+            CMD_HANDSHAKE,
+            0x2100_0100,
+            HANDSHAKE_MAGIC,
+            &[0x00, 0x10, 0x00, 0x00],
+        ),
+        build_edit_handshake(
+            EDIT_CHANNEL,
+            2,
+            CMD_OPEN,
+            0x0000_1000,
+            MAGIC,
+            &[0x01, 0x00, 0x06, 0x00, 0x01, 0x00, 0x00, 0x00, 0x06],
+        ),
+        build_edit_handshake(EDIT_CHANNEL, 3, CMD_CHUNK, 0x0000_1009, MAGIC, &[]),
     ]
 }
 

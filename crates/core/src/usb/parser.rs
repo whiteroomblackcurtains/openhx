@@ -1,6 +1,6 @@
 use crate::{
     error::HxError,
-    models::{Preset, Setlist},
+    models::{Preset, PresetBlock, PresetDetails, Setlist},
     usb::protocol::{RESPONSE_LEN_OFFSET, RESPONSE_PAYLOAD_OFFSET},
 };
 use openhx_i18n::fl;
@@ -147,6 +147,139 @@ pub fn parse_msgpack_stream(
         .iter()
         .map(|item| parse_preset(item, preset_count, setlist))
         .collect()
+}
+
+pub fn parse_preset_document(data: &[u8]) -> Result<PresetDetails, HxError> {
+    let envelope = locate_document_envelope(data)?;
+    let blob = envelope
+        .as_map()
+        .and_then(|map| find_map_value(map, 104))
+        .and_then(|value| match value {
+            rmpv::Value::Binary(bytes) => Some(bytes.as_slice()),
+            rmpv::Value::String(text) => Some(text.as_bytes()),
+            _ => None,
+        })
+        .ok_or_else(|| HxError::protocol("preset document has no binary payload"))?;
+
+    let mut cursor = Cursor::new(blob);
+    let magic = read_value(&mut cursor)?;
+    if magic.as_str().map(|value| value.trim_end_matches('\0')) != Some("l6-helix") {
+        return Err(HxError::protocol(
+            "preset document has an invalid magic value",
+        ));
+    }
+    let _header = read_value(&mut cursor)?;
+    let preset = read_value(&mut cursor)?;
+    decode_preset_blocks(&preset)
+}
+
+fn locate_document_envelope(data: &[u8]) -> Result<rmpv::Value, HxError> {
+    for offset in 0..data.len() {
+        let mut cursor = Cursor::new(&data[offset..]);
+        let Ok(value) = read_value(&mut cursor) else {
+            continue;
+        };
+        if value.as_map().is_some_and(|map| {
+            find_map_value(map, 104).is_some_and(|value| {
+                matches!(value, rmpv::Value::Binary(_) | rmpv::Value::String(_))
+            })
+        }) {
+            return Ok(value);
+        }
+    }
+    Err(HxError::protocol("preset document envelope was not found"))
+}
+
+fn find_map_value(map: &[(rmpv::Value, rmpv::Value)], key: i64) -> Option<&rmpv::Value> {
+    map.iter()
+        .find(|(candidate, _)| candidate.as_i64() == Some(key))
+        .map(|(_, value)| value)
+}
+
+fn decode_preset_blocks(preset: &rmpv::Value) -> Result<PresetDetails, HxError> {
+    let mut blocks = Vec::new();
+    for dsp in 0..2i64 {
+        let Some(slots) = find_map_value(
+            preset
+                .as_map()
+                .ok_or_else(|| HxError::protocol("preset is not a map"))?,
+            dsp,
+        )
+        .and_then(|group| find_map_value(group.as_map()?, 22))
+        .and_then(rmpv::Value::as_array) else {
+            continue;
+        };
+        for (index, slot) in slots.iter().enumerate() {
+            let Some(kind) = slot
+                .as_map()
+                .and_then(|map| find_map_value(map, 19))
+                .and_then(rmpv::Value::as_i64)
+            else {
+                continue;
+            };
+            if kind != 6 && kind != 7 {
+                continue;
+            }
+            let content = slot
+                .as_map()
+                .and_then(|map| find_map_value(map, 20))
+                .and_then(rmpv::Value::as_map);
+            let (model_index, paired_model_index, parameter_key) = if kind == 7 {
+                (
+                    content
+                        .and_then(|map| find_map_value(map, 8))
+                        .and_then(rmpv::Value::as_u64)
+                        .and_then(|value| u16::try_from(value).ok()),
+                    None,
+                    7,
+                )
+            } else {
+                let meta = content
+                    .and_then(|map| find_map_value(map, 24))
+                    .and_then(rmpv::Value::as_map);
+                (
+                    meta.and_then(|map| find_map_value(map, 25))
+                        .and_then(rmpv::Value::as_u64)
+                        .and_then(|value| u16::try_from(value).ok()),
+                    meta.and_then(|map| find_map_value(map, 26))
+                        .and_then(rmpv::Value::as_u64)
+                        .and_then(|value| u16::try_from(value).ok()),
+                    11,
+                )
+            };
+            let parameters = decode_parameters(content.map(|value| &**value), parameter_key);
+            let paired_parameters = decode_parameters(content.map(|value| &**value), 12);
+            blocks.push(PresetBlock {
+                slot: u8::try_from(dsp * 20 + index as i64)
+                    .map_err(|_| HxError::protocol("preset block slot is out of range"))?,
+                model_index,
+                paired_model_index,
+                parameters,
+                paired_parameters,
+            });
+        }
+    }
+    Ok(PresetDetails { blocks })
+}
+
+fn decode_parameters(content: Option<&[(rmpv::Value, rmpv::Value)]>, key: i64) -> Vec<f32> {
+    content
+        .and_then(|map| find_map_value(map, key))
+        .and_then(|value| value.as_map())
+        .and_then(|map| find_map_value(map, 4))
+        .and_then(rmpv::Value::as_array)
+        .map(|values| {
+            values
+                .iter()
+                .filter_map(|value| {
+                    value
+                        .as_f64()
+                        .map(|number| number as f32)
+                        .or_else(|| value.as_bool().map(|value| if value { 1.0 } else { 0.0 }))
+                })
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 /// Parses one preset slot.

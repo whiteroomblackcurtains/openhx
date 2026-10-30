@@ -23,6 +23,14 @@ cli-select-preset-about = Seleciona um preset específico no dispositivo
 cli-select-preset-long = Altera o preset ativo no dispositivo Line 6 conectado, informando os índices de setlist e preset.
 cli-selecting-preset = Selecionando setlist { $setlist }, preset { $preset }...
 cli-preset-selected-success = Preset selecionado com sucesso!
+cli-rename-preset-about = Renomeia um preset armazenado sem alterar sua cadeia de sinal.
+cli-rename-preset-long = Altera apenas o nome salvo do preset. Não salva alterações pendentes de parâmetros.
+cli-set-parameter-about = Altera um parâmetro de ponto flutuante no preset ativo.
+cli-set-parameter-long = Usa os índices de bloco e parâmetro reportados pelo protocolo HX.
+cli-renaming-preset = Renomeando preset { $preset } da setlist { $setlist } para "{ $name }"...
+cli-preset-renamed-success = Preset renomeado com sucesso!
+cli-setting-parameter = Alterando bloco { $block } parâmetro { $parameter } para { $value }...
+cli-parameter-set-success = Parâmetro alterado com sucesso!
 
 mock-mode-active = [mock] Rodando em modo simulado — hardware físico não é necessário.
 
