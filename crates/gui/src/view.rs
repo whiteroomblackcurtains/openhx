@@ -251,6 +251,9 @@ fn signal_chain(app: &App) -> Element<'_, Message> {
                     None => text("No block").into(),
                 }))
             })
+            .on_click(|pane| {
+                Message::BlockSelected(app.block_panes.get(pane).copied().unwrap_or_default())
+            })
             .on_drag(Message::BlockDragged)
             .spacing(8)
             .min_size(140)
@@ -283,7 +286,7 @@ fn signal_chain(app: &App) -> Element<'_, Message> {
 
 fn block_card(block: &EditorBlock, selected: bool) -> Element<'_, Message> {
     let color = block_color(&block.model_id);
-    button(
+    container(
         column![
             container(
                 text(block.model.clone())
@@ -310,14 +313,12 @@ fn block_card(block: &EditorBlock, selected: bool) -> Element<'_, Message> {
     )
     .width(Length::Fixed(140.0))
     .padding(0)
-    .on_press(Message::BlockSelected(block.slot))
-    .style(move |_theme: &Theme, _status| button::Style {
+    .style(move |_theme: &Theme| container::Style {
         background: Some(if selected {
             Color::from_rgb(0.14, 0.3, 0.48).into()
         } else {
             Color::from_rgb(0.12, 0.12, 0.14).into()
         }),
-        text_color: Color::WHITE,
         border: iced::Border {
             color: if selected {
                 Color::from_rgb(0.35, 0.65, 0.95)

@@ -19,7 +19,10 @@ pub enum Message {
     /// Loading a setlist failed; the previous list stays on screen.
     SetlistLoadFailed(u8, String),
     PresetSelected(u8),
-    PresetLoaded(Result<(String, PresetDetails), String>),
+    PresetLoaded {
+        index: u8,
+        result: Result<(String, PresetDetails), String>,
+    },
     PresetNameChanged(String),
     RenamePreset,
     PresetRenameFinished(Result<(), String>),

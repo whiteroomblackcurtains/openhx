@@ -124,10 +124,14 @@ pub fn handle_message(app: &mut App, message: Message) -> Task<Message> {
                     .map(|details| (name, details))
                     .map_err(|e| e.to_string())
                 },
-                Message::PresetLoaded,
+                move |result| Message::PresetLoaded { index, result },
             )
         }
-        Message::PresetLoaded(result) => {
+        Message::PresetLoaded { index, result } => {
+            if app.selected_preset != Some(index) {
+                info!("Ignoring stale load result for preset {index:03}");
+                return Task::none();
+            }
             match result {
                 Ok((name, details)) => {
                     if let Err(error) = app.editor.load_details(name, &details) {
