@@ -36,7 +36,7 @@ OpenHX was built to close that gap.
 - 🚧 Import and export presets (`.hlx` files)
 - ✅ Reorder blocks by drag and drop
 - 🚧 Toggle individual effect blocks
-- ✅ Load and validate mono 48 kHz impulse-response WAV files
+- ✅ Load and validate mono or stereo 48 kHz impulse-response WAV files
 - 🚧 Upload impulse responses to device flash
 - ✅ Offline preset editing workspace
 - 🚧 Configure Global EQ

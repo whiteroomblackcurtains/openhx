@@ -12,6 +12,7 @@ pub enum EditorPane {
 pub struct LoadedIr {
     pub path: String,
     pub sample_rate: u32,
+    pub channels: u16,
     pub samples: usize,
 }
 

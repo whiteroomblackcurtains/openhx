@@ -336,8 +336,8 @@ pub fn handle_message(app: &mut App, message: Message) -> Task<Message> {
                     let mut reader = hound::WavReader::open(&path)
                         .map_err(|error| format!("failed to open IR WAV: {error}"))?;
                     let spec = reader.spec();
-                    if spec.channels != 1 {
-                        return Err("IR WAV must be mono".to_string());
+                    if !matches!(spec.channels, 1 | 2) {
+                        return Err("IR WAV must be mono or stereo".to_string());
                     }
                     if spec.sample_rate != 48_000 {
                         return Err(format!(
@@ -360,16 +360,18 @@ pub fn handle_message(app: &mut App, message: Message) -> Task<Message> {
                             })
                             .collect(),
                     };
-                    if !matches!(samples.len(), 256 | 512 | 1024 | 2048) {
+                    let frame_count = samples.len() / usize::from(spec.channels);
+                    if !matches!(frame_count, 256 | 512 | 1024 | 2048) {
                         return Err(format!(
-                            "IR must contain 256, 512, 1024, or 2048 samples (found {})",
-                            samples.len()
+                            "IR must contain 256, 512, 1024, or 2048 samples per channel (found {})",
+                            frame_count
                         ));
                     }
                     Ok(crate::app::LoadedIr {
                         path: path.display().to_string(),
                         sample_rate: spec.sample_rate,
-                        samples: samples.len(),
+                        channels: spec.channels,
+                        samples: frame_count,
                     })
                 })
                 .await

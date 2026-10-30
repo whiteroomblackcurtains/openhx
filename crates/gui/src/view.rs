@@ -355,9 +355,12 @@ fn parameter_inspector(app: &App) -> Element<'_, Message> {
 
     let color = block_color(&block.model_id);
     let ir_status: Element<'_, Message> = match &app.loaded_ir {
-        Some(ir) => text(format!("IR: {} samples\n{}", ir.samples, ir.path))
-            .size(11)
-            .into(),
+        Some(ir) => text(format!(
+            "IR: {} samples, {} channel(s)\n{}",
+            ir.samples, ir.channels, ir.path
+        ))
+        .size(11)
+        .into(),
         None => text("No IR loaded").size(11).into(),
     };
     panel(
