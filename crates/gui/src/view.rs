@@ -336,7 +336,25 @@ fn parameter_inspector(app: &App) -> Element<'_, Message> {
     }
 
     let color = block_color(&block.model_id);
-    panel(scrollable(controls).height(Length::Fill), color).into()
+    let ir_status: Element<'_, Message> = match &app.loaded_ir {
+        Some(ir) => text(format!("IR: {} samples\n{}", ir.samples, ir.path))
+            .size(11)
+            .into(),
+        None => text("No IR loaded").size(11).into(),
+    };
+    panel(
+        column![
+            button(text("Load IR WAV"))
+                .on_press(Message::LoadIr)
+                .padding([6, 10])
+                .style(button::secondary),
+            ir_status,
+            scrollable(controls).height(Length::Fill),
+        ]
+        .spacing(8),
+        color,
+    )
+    .into()
 }
 
 fn parameter_control(block: u8, parameter: &EditorParameter, color: Color) -> Element<'_, Message> {

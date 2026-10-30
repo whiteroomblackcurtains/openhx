@@ -8,6 +8,13 @@ pub enum EditorPane {
     Inspector,
 }
 
+#[derive(Debug, Clone)]
+pub struct LoadedIr {
+    pub path: String,
+    pub sample_rate: u32,
+    pub samples: usize,
+}
+
 pub struct App {
     pub state: AppState,
     pub device_name: String,
@@ -21,6 +28,7 @@ pub struct App {
     pub editor: crate::state::EditorState,
     pub panes: pane_grid::State<EditorPane>,
     pub block_panes: pane_grid::State<u8>,
+    pub loaded_ir: Option<LoadedIr>,
 }
 
 impl Default for App {
@@ -41,6 +49,7 @@ impl Default for App {
                 b: Box::new(pane_grid::Configuration::Pane(EditorPane::Inspector)),
             }),
             block_panes: pane_grid::State::new(0).0,
+            loaded_ir: None,
         }
     }
 }

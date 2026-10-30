@@ -285,6 +285,71 @@ pub fn handle_message(app: &mut App, message: Message) -> Task<Message> {
             }
             Task::none()
         }
+        Message::LoadIr => Task::perform(
+            async {
+                tokio::task::spawn_blocking(|| {
+                    let path = rfd::FileDialog::new()
+                        .add_filter("Impulse response", &["wav"])
+                        .pick_file()
+                        .ok_or_else(|| "IR loading cancelled".to_string())?;
+                    let mut reader = hound::WavReader::open(&path)
+                        .map_err(|error| format!("failed to open IR WAV: {error}"))?;
+                    let spec = reader.spec();
+                    if spec.channels != 1 {
+                        return Err("IR WAV must be mono".to_string());
+                    }
+                    if spec.sample_rate != 48_000 {
+                        return Err(format!(
+                            "IR WAV must use 48000 Hz (found {} Hz)",
+                            spec.sample_rate
+                        ));
+                    }
+                    let samples = match spec.sample_format {
+                        hound::SampleFormat::Float => reader
+                            .samples::<f32>()
+                            .collect::<Result<Vec<_>, _>>()
+                            .map_err(|error| format!("failed to read IR samples: {error}"))?,
+                        hound::SampleFormat::Int => reader
+                            .samples::<i32>()
+                            .collect::<Result<Vec<_>, _>>()
+                            .map_err(|error| format!("failed to read IR samples: {error}"))?
+                            .into_iter()
+                            .map(|sample| {
+                                sample as f32 / (1_i64 << (spec.bits_per_sample - 1)) as f32
+                            })
+                            .collect(),
+                    };
+                    if !matches!(samples.len(), 256 | 512 | 1024 | 2048) {
+                        return Err(format!(
+                            "IR must contain 256, 512, 1024, or 2048 samples (found {})",
+                            samples.len()
+                        ));
+                    }
+                    Ok(crate::app::LoadedIr {
+                        path: path.display().to_string(),
+                        sample_rate: spec.sample_rate,
+                        samples: samples.len(),
+                    })
+                })
+                .await
+                .map_err(|error| error.to_string())?
+            },
+            Message::IrLoaded,
+        ),
+        Message::IrLoaded(result) => {
+            match result {
+                Ok(ir) => {
+                    app.loaded_ir = Some(ir);
+                    app.error_log = None;
+                }
+                Err(error) if error != "IR loading cancelled" => {
+                    error!("IR load failed: {error}");
+                    app.error_log = Some(error);
+                }
+                Err(_) => {}
+            }
+            Task::none()
+        }
         Message::BlockSelected(block) => {
             app.editor.selected_block = block;
             Task::none()

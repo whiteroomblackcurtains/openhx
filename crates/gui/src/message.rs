@@ -31,6 +31,8 @@ pub enum Message {
         temporary: u8,
         result: Result<(), String>,
     },
+    LoadIr,
+    IrLoaded(Result<crate::app::LoadedIr, String>),
     BlockSelected(u8),
     ParameterChanged(u8, f32),
     ParameterEditReleased {
