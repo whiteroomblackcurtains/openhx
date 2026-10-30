@@ -243,9 +243,13 @@ fn signal_chain(app: &App) -> Element<'_, Message> {
             pane_grid(&app.block_panes, |_pane, slot, _maximized| {
                 let block = app.editor.blocks.iter().find(|block| block.slot == *slot);
                 pane_grid::Content::new(match block {
+                    Some(_) => Element::from(text("")),
+                    None => Element::from(text("No block")),
+                })
+                .title_bar(pane_grid::TitleBar::new(match block {
                     Some(block) => block_card(block, app.editor.selected_block == block.slot),
                     None => text("No block").into(),
-                })
+                }))
             })
             .on_drag(Message::BlockDragged)
             .spacing(8)
