@@ -71,7 +71,10 @@ impl DeviceClient for MockClient {
     }
 
     fn read_current_preset(&self) -> Result<PresetDetails, HxError> {
-        Ok(PresetDetails { blocks: Vec::new() })
+        Ok(PresetDetails {
+            blocks: Vec::new(),
+            selected_block: None,
+        })
     }
 
     fn read_current_preset_index(&self) -> Result<Option<u8>, HxError> {

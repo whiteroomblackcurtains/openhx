@@ -49,6 +49,7 @@ impl std::fmt::Display for Preset {
 #[derive(Debug, Clone, PartialEq)]
 pub struct PresetDetails {
     pub blocks: Vec<PresetBlock>,
+    pub selected_block: Option<(u8, u8)>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

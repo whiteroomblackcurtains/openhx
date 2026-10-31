@@ -276,7 +276,43 @@ fn decode_preset_blocks(preset: &rmpv::Value) -> Result<PresetDetails, HxError> 
             });
         }
     }
-    Ok(PresetDetails { blocks })
+    Ok(PresetDetails {
+        blocks,
+        selected_block: find_selected_block(preset),
+    })
+}
+
+fn find_selected_block(value: &rmpv::Value) -> Option<(u8, u8)> {
+    if let Some(map) = value.as_map() {
+        let block = map.iter().find_map(|(key, value)| {
+            (key.as_i64() == Some(98))
+                .then(|| value.as_u64().and_then(|value| u8::try_from(value).ok()))
+                .flatten()
+        });
+        let model = map.iter().find_map(|(key, value)| {
+            (key.as_i64() == Some(26))
+                .then(|| value.as_u64().and_then(|value| u8::try_from(value).ok()))
+                .flatten()
+        });
+        if let (Some(block), Some(model)) = (block, model) {
+            return Some((block, model));
+        }
+        for (key, child) in map {
+            if let Some(selected) = find_selected_block(key) {
+                return Some(selected);
+            }
+            if let Some(selected) = find_selected_block(child) {
+                return Some(selected);
+            }
+        }
+    } else if let Some(array) = value.as_array() {
+        for child in array {
+            if let Some(selected) = find_selected_block(child) {
+                return Some(selected);
+            }
+        }
+    }
+    None
 }
 
 fn decode_parameters(content: Option<&[(rmpv::Value, rmpv::Value)]>, key: i64) -> Vec<f32> {

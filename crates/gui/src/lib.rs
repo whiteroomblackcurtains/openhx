@@ -950,13 +950,32 @@ fn device_worker(command_rx: Receiver<Command>, event_tx: Sender<Event>) {
 }
 
 pub fn run() -> Result<(), Box<dyn std::error::Error>> {
+    let log_dir = std::env::var_os("LOCALAPPDATA")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| {
+            std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
+        })
+        .join("OpenHX");
+    std::fs::create_dir_all(&log_dir)?;
+    let log_path = log_dir.join("openhx.log");
+    let log_file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_path)?;
+    let (writer, log_guard) = tracing_appender::non_blocking(log_file);
+
     tracing_subscriber::fmt()
         .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
+            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+                tracing_subscriber::EnvFilter::new("openhx_core=debug,openhx_gui=debug")
+            }),
         )
         .with_target(false)
+        .with_ansi(false)
+        .with_writer(writer)
         .init();
+    tracing::info!(path = %log_path.display(), "OpenHX diagnostic logging started");
+    let _log_guard = log_guard;
     dioxus::launch(App);
     Ok(())
 }

@@ -125,6 +125,10 @@ an unsafe command from causing USB timeouts.
 Preset block discovery and current parameter values are read from the device edit buffer.
 Routing, snapshots, and the remaining editor workflows are still being expanded.
 
+The Windows GUI writes diagnostic logs to
+`%LOCALAPPDATA%\OpenHX\openhx.log`. USB block-selection requests, response sequence
+numbers, follow-up chunk exchanges, errors, and elapsed timings are recorded there.
+
 ---
 
 ## 🔬 How It Works

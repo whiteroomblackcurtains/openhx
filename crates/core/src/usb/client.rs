@@ -143,7 +143,7 @@ impl Client {
             block_select_session: Cell::new(false),
             block_select_sequence: Cell::new(0x04),
             block_select_transaction: Cell::new(1009),
-            block_select_argument: Cell::new(0x0000_1009),
+            block_select_argument: Cell::new(0x0000_1B64),
         };
 
         // Discard data buffered by a prior unclosed session so it cannot
@@ -531,7 +531,9 @@ impl Client {
                 "discarding out-of-band USB pkt",
             );
         }
-        Err(HxError::Usb(rusb::Error::Timeout))
+        Err(HxError::protocol(format!(
+            "edit response sequence 0x{expected:02X} not received after discarding {MAX_STALE_DROPS} packets"
+        )))
     }
 
     /// Runs the full five-packet session-init exchange.
@@ -818,6 +820,8 @@ impl DeviceClient for Client {
     }
 
     fn select_block(&self, block: u8, model: u8) -> Result<(), HxError> {
+        let started = std::time::Instant::now();
+        tracing::info!(block, model, "block selection started");
         if block >= 40 {
             return Err(HxError::protocol("block slot must be below 40"));
         }
@@ -828,21 +832,29 @@ impl DeviceClient for Client {
         let mut buf = vec![0u8; 512];
 
         if !self.block_select_session.get() {
+            tracing::debug!("block selection opening edit session");
             self.drain_stale_data();
             self.block_select_sequence.set(0x04);
             self.block_select_transaction.set(1009);
-            self.block_select_argument.set(0x0000_1009);
+            self.block_select_argument.set(0x0000_1B64);
             for packet in edit_channel_handshake() {
                 let seq = packet[SEQ_BYTE_OFFSET];
                 let handshake_result = (|| {
+                    tracing::debug!(seq, "block selection handshake request");
                     self.handle
                         .write_bulk(EP_OUT, &packet, timeout)
                         .map_err(HxError::Usb)?;
-                    self.read_for_seq(seq, &mut buf, timeout)?;
+                    let n = self.read_for_seq(seq, &mut buf, timeout)?;
+                    tracing::debug!(seq, bytes = n, "block selection handshake response");
                     Ok::<(), HxError>(())
                 })();
                 if let Err(error) = handshake_result {
                     self.block_select_session.set(false);
+                    tracing::error!(
+                        ?error,
+                        elapsed_ms = started.elapsed().as_millis(),
+                        "block selection handshake failed"
+                    );
                     return Err(error);
                 }
             }
@@ -852,6 +864,12 @@ impl DeviceClient for Client {
         let sequence = self.block_select_sequence.get();
         let transaction = self.block_select_transaction.get();
         let argument = self.block_select_argument.get();
+        tracing::info!(
+            sequence,
+            transaction,
+            argument = format_args!("0x{argument:08X}"),
+            "block selection edit request"
+        );
         let request = build_edit_request(
             sequence,
             argument,
@@ -868,8 +886,9 @@ impl DeviceClient for Client {
             .write_bulk(EP_OUT, &request, timeout)
             .map_err(HxError::Usb)
             .and_then(|_| {
-                self.read_for_seq(sequence, &mut buf, timeout)
-                    .and_then(|n| parse_edit_response(&buf[..n]))
+                let n = self.read_for_seq(sequence, &mut buf, timeout)?;
+                tracing::debug!(sequence, bytes = n, "block selection response");
+                parse_edit_response(&buf[..n])
             });
 
         match result {
@@ -877,6 +896,11 @@ impl DeviceClient for Client {
                 let next_sequence = sequence.wrapping_add(1);
                 let next_argument = argument.wrapping_add(0x11);
                 let chunk_request = build_edit_chunk_request(next_sequence, next_argument);
+                tracing::info!(
+                    next_sequence,
+                    argument = format_args!("0x{next_argument:08X}"),
+                    "block selection chunk request"
+                );
                 if let Err(error) = self
                     .handle
                     .write_bulk(EP_OUT, &chunk_request, timeout)
@@ -884,18 +908,38 @@ impl DeviceClient for Client {
                 {
                     self.block_select_session.set(false);
                     self.drain_stale_data();
+                    tracing::error!(
+                        ?error,
+                        elapsed_ms = started.elapsed().as_millis(),
+                        "block selection chunk exchange failed"
+                    );
                     return Err(error);
                 }
-                self.block_select_sequence.set(sequence.wrapping_add(4));
+                // The chunk request already consumed `sequence + 1`; the next
+                // real edit request must use a sequence the device has not
+                // seen yet, or it silently drops it as a duplicate (captured
+                // HX Edit traffic shows the chunk's sequence is never reused:
+                // selection N's chunk sits at `seq+1`, and selection N+1
+                // always lands strictly after it).
+                self.block_select_sequence
+                    .set(next_sequence.wrapping_add(1));
                 self.block_select_transaction
                     .set(transaction.wrapping_add(1));
                 self.block_select_argument.set(next_argument);
-                self.drain_stale_data();
+                tracing::info!(
+                    elapsed_ms = started.elapsed().as_millis(),
+                    "block selection completed"
+                );
                 Ok(())
             }
             Err(error) => {
                 self.block_select_session.set(false);
                 self.drain_stale_data();
+                tracing::error!(
+                    ?error,
+                    elapsed_ms = started.elapsed().as_millis(),
+                    "block selection request failed"
+                );
                 Err(error)
             }
         }
@@ -974,8 +1018,19 @@ fn parse_current_preset_identity_response(response: &[u8]) -> Result<Option<u8>,
 }
 
 fn parse_edit_response(response: &[u8]) -> Result<(), HxError> {
-    if response.len() < 24 {
+    // A device that has already acknowledged one edit request on this
+    // session often answers the next with a header-only ack (16 bytes,
+    // no MessagePack status payload) rather than repeating the full
+    // 36-byte envelope the very first request gets. Captured HX Edit
+    // traffic confirms this: only the session's first `open` reply
+    // carries a payload; every subsequent one is header-only. Treat a
+    // complete 16-byte header with no body as a bare success rather than
+    // an error.
+    if response.len() < RESPONSE_HEADER_SIZE {
         return Err(HxError::protocol("edit response is too short"));
+    }
+    if response.len() < 24 {
+        return Ok(());
     }
 
     let body = &response[16..];

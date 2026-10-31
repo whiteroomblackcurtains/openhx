@@ -73,6 +73,7 @@ impl EditorState {
         name: impl Into<String>,
         details: &openhx_core::PresetDetails,
     ) -> Result<(), String> {
+        let previous_selected_block = self.selected_block;
         let mut blocks = Vec::with_capacity(details.blocks.len());
         for block in &details.blocks {
             let model_index = block
@@ -89,7 +90,16 @@ impl EditorState {
             )?);
         }
         self.preset_name = name.into();
-        self.selected_block = blocks.first().map_or(0, |block| block.slot);
+        self.selected_block = details
+            .selected_block
+            .map(|(slot, _)| slot)
+            .or_else(|| {
+                blocks
+                    .iter()
+                    .find(|block| block.slot == previous_selected_block)
+                    .map(|block| block.slot)
+            })
+            .unwrap_or_else(|| blocks.first().map_or(0, |block| block.slot));
         self.selected_snapshot = 0;
         self.blocks = blocks;
         Ok(())
